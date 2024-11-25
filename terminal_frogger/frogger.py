@@ -1,7 +1,7 @@
 import os
 import time
 import random
-import keyboard
+from pynput import keyboard
 from threading import Thread
 
 """
@@ -154,7 +154,6 @@ def main():
                 game.move_frog('right')
             elif keyboard.is_pressed('q'):
                 game.game_over = True
-            game.draw()
             time.sleep(0.1)
     
     input_thread = Thread(target=handle_input)
@@ -163,10 +162,34 @@ def main():
     while not game.game_over:
         game.move_obstacles()
         game.check_collision()
-        game.draw()
+        # TODO: enable this after keyboard input actually works. Rendering
+        # hides the error messages 🙃
+        #game.draw()
         time.sleep(0.2)
         
     print(f"Game Over! Final Score: {game.score}")
+
+
+"""
+def on_press(key):
+    try:
+        print(f'Key {key.char} pressed')
+    except AttributeError:
+        print(f'Special key {key} pressed')
+
+def on_release(key):
+    print(f'Key {key} released')
+    if key == keyboard.Key.esc:
+        # Stop listener
+        return False
+
+# Collect events until released
+with keyboard.Listener(
+        on_press=on_press,
+        on_release=on_release) as listener:
+    listener.join()
+"""
+
 
 if __name__ == "__main__":
     main()
