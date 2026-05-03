@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 
 // ────────────────────────────────────────────────────────────────────────────
 // FOREST GENERATION (Step 1 of the spec)
@@ -81,18 +81,118 @@ function generateForest({ numBaskets, seed }) {
 // so chains can collapse inside a single basket.
 // ────────────────────────────────────────────────────────────────────────────
 
-const PALETTE = [
-  "#e63946", // cherry red
-  "#f4a261", // tangerine
-  "#ffd23f", // marigold
-  "#a8d667", // lime
-  "#2ec4b6", // turquoise
-  "#3a86ff", // cobalt
-  "#7b4bd6", // grape
-  "#ff5d8f", // bubblegum
-  "#a76f3d", // caramel
-  "#4c6fbf", // cornflower
+const YARN_COLORS = [
+  { hex: "#b51d2a", name: "brick", pattern: "cross" },
+  { hex: "#e87500", name: "orange", pattern: "vertical" },
+  { hex: "#c9a600", name: "ochre", pattern: "horizontal" },
+  { hex: "#12823b", name: "emerald", pattern: "forward" },
+  { hex: "#008b8b", name: "teal", pattern: "back" },
+  { hex: "#0067b1", name: "azure", pattern: "dots-light" },
+  { hex: "#7b2cbf", name: "purple", pattern: "grid" },
+  { hex: "#b0006d", name: "berry", pattern: "wide-forward" },
+  { hex: "#7f4f24", name: "umber", pattern: "dots-dark" },
+  { hex: "#343a40", name: "charcoal", pattern: "wide-back" },
 ];
+
+const PALETTE = YARN_COLORS.map((color) => color.hex);
+const YARN_COLOR_BY_HEX = new Map(YARN_COLORS.map((color, i) => [color.hex, { ...color, i }]));
+
+function yarnMeta(color) {
+  return YARN_COLOR_BY_HEX.get(color) || { hex: color, name: color, pattern: "solid", i: 0 };
+}
+
+function yarnPatternId(color) {
+  return `yarn-pattern-${yarnMeta(color).i}`;
+}
+
+function yarnTitle(color) {
+  const meta = yarnMeta(color);
+  return `${meta.name} yarn (${meta.hex})`;
+}
+
+const YARN_PATTERN_CACHE = new Map();
+
+function yarnPatternSpec(pattern) {
+  const light = "#fbf3df";
+  const dark = "#2a1d10";
+  const lightOpacity = pattern.includes("dark") ? 0.25 : 0.42;
+
+  if (pattern === "vertical") {
+    return {
+      width: 7,
+      height: 7,
+      markup: `<rect x="0" y="0" width="2" height="7" fill="${light}" opacity="${lightOpacity}" />`,
+    };
+  }
+  if (pattern === "cross") {
+    return {
+      width: 9,
+      height: 9,
+      markup: `<path d="M -2 9 L 9 -2 M 2 11 L 11 2 M -2 0 L 9 11 M 2 -2 L 11 7" stroke="${light}" stroke-width="1.7" opacity="${lightOpacity}" />`,
+    };
+  }
+  if (pattern === "horizontal") {
+    return {
+      width: 7,
+      height: 7,
+      markup: `<rect x="0" y="0" width="7" height="1.5" fill="${dark}" opacity="0.24" />`,
+    };
+  }
+  if (pattern === "forward" || pattern === "wide-forward") {
+    const strokeWidth = pattern === "wide-forward" ? 3 : 2;
+    return {
+      width: 8,
+      height: 8,
+      markup: `<path d="M -2 8 L 8 -2 M 2 10 L 10 2" stroke="${light}" stroke-width="${strokeWidth}" opacity="${lightOpacity}" />`,
+    };
+  }
+  if (pattern === "back" || pattern === "wide-back") {
+    const strokeWidth = pattern === "wide-back" ? 3 : 2;
+    return {
+      width: 8,
+      height: 8,
+      markup: `<path d="M -2 0 L 8 10 M 2 -2 L 10 6" stroke="${light}" stroke-width="${strokeWidth}" opacity="${lightOpacity}" />`,
+    };
+  }
+  if (pattern === "dots-light" || pattern === "dots-dark") {
+    const fill = pattern === "dots-dark" ? dark : light;
+    return {
+      width: 8,
+      height: 8,
+      markup: `<circle cx="2" cy="2" r="1.8" fill="${fill}" opacity="${lightOpacity}" />`,
+    };
+  }
+  if (pattern === "grid") {
+    return {
+      width: 7,
+      height: 7,
+      markup: `<path d="M 0 0 H 7 M 0 0 V 7" stroke="${light}" stroke-width="1.5" opacity="0.38" />`,
+    };
+  }
+  return { width: 8, height: 8, markup: "" };
+}
+
+function yarnPatternDataUrl(pattern) {
+  if (YARN_PATTERN_CACHE.has(pattern)) return YARN_PATTERN_CACHE.get(pattern);
+  const spec = yarnPatternSpec(pattern);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${spec.width}" height="${spec.height}" viewBox="0 0 ${spec.width} ${spec.height}">${spec.markup}</svg>`;
+  const href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  YARN_PATTERN_CACHE.set(pattern, href);
+  return href;
+}
+
+function yarnFillStyle(color) {
+  const { pattern } = yarnMeta(color);
+  const spec = yarnPatternSpec(pattern);
+  const style = { backgroundColor: color };
+
+  if (spec.markup) {
+    style.backgroundImage = `url("${yarnPatternDataUrl(pattern)}")`;
+    style.backgroundSize = `${spec.width}px ${spec.height}px`;
+  }
+
+  return style;
+}
 
 function colorForestAndMakeBaskets(forest, rng) {
   const { nodes } = forest;
@@ -136,31 +236,61 @@ function colorForestAndMakeBaskets(forest, rng) {
 
 function layoutForest(forest, opts) {
   const { nodes, rootIds } = forest;
-  const xGap = opts.xGap;
-  const yGap = opts.yGap;
+  const rootRadius = opts.rootRadius;
+  const radialGap = opts.radialGap;
+  const minNodeArc = opts.minNodeArc;
   const pos = new Map();
-  let cursorX = 0;
+  const angles = new Map();
 
-  const layoutSubtree = (id) => {
+  const leaves = [];
+  const collectLeaves = (id) => {
     const node = nodes[id];
-    const y = node.depth * yGap;
     if (node.children.length === 0) {
-      const x = cursorX;
-      cursorX += xGap;
-      pos.set(id, { x, y });
-      return { x, y };
+      leaves.push(id);
+      return;
     }
-    const childPositions = node.children.map(layoutSubtree);
-    const minX = Math.min(...childPositions.map((p) => p.x));
-    const maxX = Math.max(...childPositions.map((p) => p.x));
-    const x = (minX + maxX) / 2;
-    pos.set(id, { x, y });
-    return { x, y };
+    node.children.forEach(collectLeaves);
   };
 
-  for (const r of rootIds) {
-    layoutSubtree(r);
-    cursorX += xGap * 0.6;
+  rootIds.forEach(collectLeaves);
+
+  const leafCount = Math.max(leaves.length, 1);
+  leaves.forEach((id, i) => {
+    angles.set(id, -Math.PI / 2 + (Math.PI * 2 * i) / leafCount);
+  });
+
+  const assignInternalAngles = (id) => {
+    const node = nodes[id];
+    if (node.children.length === 0) return angles.get(id);
+
+    const childAngles = node.children.map(assignInternalAngles);
+    const x = childAngles.reduce((sum, angle) => sum + Math.cos(angle), 0);
+    const y = childAngles.reduce((sum, angle) => sum + Math.sin(angle), 0);
+    const angle = Math.atan2(y, x);
+    angles.set(id, angle);
+    return angle;
+  };
+
+  rootIds.forEach(assignInternalAngles);
+
+  const byDepth = new Map();
+  for (const node of nodes) {
+    if (!byDepth.has(node.depth)) byDepth.set(node.depth, []);
+    byDepth.get(node.depth).push(node);
+  }
+
+  for (const [depth, depthNodes] of byDepth) {
+    const count = depthNodes.length;
+    const radius = Math.max(rootRadius + depth * radialGap, (count * minNodeArc) / (Math.PI * 2));
+    const ordered = [...depthNodes].sort((a, b) => angles.get(a.id) - angles.get(b.id));
+    for (let i = 0; i < ordered.length; i++) {
+      const node = ordered[i];
+      const angle = -Math.PI / 2 + (Math.PI * 2 * i) / count;
+      pos.set(node.id, {
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+      });
+    }
   }
 
   const xs = [...pos.values()].map((p) => p.x);
@@ -174,6 +304,30 @@ function layoutForest(forest, opts) {
   };
 }
 
+function YarnSvgPatterns() {
+  return (
+    <>
+      {YARN_COLORS.map((color, i) => {
+        const id = `yarn-pattern-${i}`;
+        const spec = yarnPatternSpec(color.pattern);
+        return (
+          <pattern
+            key={id}
+            id={id}
+            width={spec.width}
+            height={spec.height}
+            patternUnits="userSpaceOnUse"
+          >
+            {spec.markup && (
+              <image href={yarnPatternDataUrl(color.pattern)} width={spec.width} height={spec.height} />
+            )}
+          </pattern>
+        );
+      })}
+    </>
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // FOREST RENDERER
 // Modes: full debug view (no filter props) OR gameplay (visibleIds, etc.)
@@ -182,21 +336,27 @@ function layoutForest(forest, opts) {
 // ────────────────────────────────────────────────────────────────────────────
 
 function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
-  const PAD = 60;
-  const X_GAP = 52;
-  const Y_GAP = 86;
-  const NODE_R = 14;
+  const PAD = 76;
+  const ROOT_RADIUS = 36;
+  const RADIAL_GAP = 88;
+  const MIN_NODE_ARC = 72;
+  const NODE_R = 24;
 
   const layout = useMemo(
-    () => layoutForest(forest, { xGap: X_GAP, yGap: Y_GAP }),
+    () =>
+      layoutForest(forest, {
+        rootRadius: ROOT_RADIUS,
+        radialGap: RADIAL_GAP,
+        minNodeArc: MIN_NODE_ARC,
+      }),
     [forest]
   );
-  const { pos, minX, maxX, maxY } = layout;
+  const { pos, minX, maxX, minY, maxY } = layout;
 
   const width = maxX - minX + PAD * 2;
-  const height = maxY + PAD * 2;
+  const height = maxY - minY + PAD * 2;
   const offsetX = -minX + PAD;
-  const offsetY = PAD;
+  const offsetY = -minY + PAD;
 
   const showAll = !visibleIds;
   const isVisible = (id) => showAll || visibleIds.has(id);
@@ -221,17 +381,22 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
   const edgePath = (e) => {
     const dx = e.bx - e.ax;
     const dy = e.by - e.ay;
-    const c1x = e.ax + dx * 0.15;
-    const c1y = e.ay + dy * 0.55;
+    const c1x = e.ax + dx * 0.55;
+    const c1y = e.ay + dy * 0.15;
     const c2x = e.bx - dx * 0.15;
-    const c2y = e.by - dy * 0.45;
+    const c2y = e.by - dy * 0.55;
     return `M ${e.ax} ${e.ay} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${e.bx} ${e.by}`;
   };
 
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
-      style={{ width: "100%", height: "auto", display: "block" }}
+      style={{
+        width: `max(100%, ${width}px)`,
+        height: "auto",
+        display: "block",
+        touchAction: "manipulation",
+      }}
       preserveAspectRatio="xMidYMin meet"
     >
       <defs>
@@ -242,6 +407,7 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
           <rect width="3" height="3" fill="transparent" />
           <circle cx="1" cy="1" r="0.3" fill="#3b2a1a" opacity="0.06" />
         </pattern>
+        <YarnSvgPatterns />
       </defs>
 
       <rect x="0" y="0" width={width} height={height} fill="url(#grain)" />
@@ -265,6 +431,7 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
           return (
             <g
               key={n.id}
+              data-yarn-node="true"
               transform={`translate(${cx}, ${cy})`}
               style={{
                 cursor: tappable && onTap ? "pointer" : "default",
@@ -273,6 +440,7 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
               }}
               onClick={tappable && onTap ? () => onTap(n.id) : undefined}
             >
+              <title>{`node ${n.id}: ${yarnTitle(n.color)}`}</title>
               {!cleared && (
                 <circle
                   r={NODE_R + 2}
@@ -285,10 +453,10 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
               {tappable && !cleared && (
                 <circle
                   className="yp-pulse"
-                  r={NODE_R + 5}
+                  r={NODE_R + 9}
                   fill="none"
                   stroke={n.color}
-                  strokeWidth="2"
+                  strokeWidth="2.4"
                   strokeOpacity="0.55"
                 />
               )}
@@ -296,12 +464,13 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
                 r={NODE_R}
                 fill={n.color || "#dba66a"}
                 stroke="#3b2a1a"
-                strokeWidth="1.6"
+                strokeWidth="2"
               />
+              <circle r={NODE_R - 2} fill={`url(#${yarnPatternId(n.color)})`} />
               {isRoot && (
-                <circle r={NODE_R - 6} fill="none" stroke="#2a1d10" strokeWidth="1.4" />
+                <circle r={NODE_R - 10} fill="none" stroke="#2a1d10" strokeWidth="1.8" />
               )}
-              {tappable && <circle r={NODE_R + 10} fill="transparent" />}
+              {tappable && <circle r={NODE_R + 18} fill="transparent" />}
             </g>
           );
         })}
@@ -753,6 +922,7 @@ export default function App() {
   const [seed, setSeed] = useState(42);
   const [debugOpen, setDebugOpen] = useState(false);
   const [shake, setShake] = useState(0);
+  const [recenterKey, setRecenterKey] = useState(0);
   const difficultyConfig =
     DIFFICULTIES.find((option) => option.id === difficulty) || DIFFICULTIES[1];
   const numBaskets = difficultyConfig.baskets;
@@ -788,6 +958,7 @@ export default function App() {
 
   const restart = useCallback(() => {
     setGame(buildInitialGameState(forest, baskets, difficultyConfig.spools));
+    setRecenterKey((key) => key + 1);
   }, [forest, baskets, difficultyConfig.spools]);
 
   const tappableIds = useMemo(() => {
@@ -867,6 +1038,23 @@ export default function App() {
         }
         button.ypseg:last-child { border-right: 0; }
         button.ypseg.active { background: #2a1d10; color: #f7ecd4; }
+        button.ypmapbtn {
+          width: 30px;
+          height: 30px;
+          border: 0;
+          background: transparent;
+          color: #2a1d10;
+          font-family: ${FONT_MONO};
+          font-size: 16px;
+          line-height: 1;
+          cursor: pointer;
+        }
+        button.ypmapbtn:hover { background: rgba(42, 29, 16, 0.1); }
+        button.ypmapbtn:disabled {
+          opacity: 0.35;
+          cursor: default;
+        }
+        button.ypmapbtn:disabled:hover { background: transparent; }
         input[type=range].ypslider {
           -webkit-appearance: none; appearance: none;
           width: 220px; height: 2px; background: #2a1d10; outline: none;
@@ -951,7 +1139,7 @@ export default function App() {
               tug a thread,
               <br />
               <span style={{ fontStyle: "normal", fontWeight: 600 }}>untangle</span>
-              <span style={{ color: "#e63946" }}>.</span>
+              <span style={{ color: YARN_COLORS[0].hex }}>.</span>
             </h1>
           </div>
           <div className="yp-actions" style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -1012,7 +1200,7 @@ export default function App() {
           >
             {won ? "fin." : `${game.cleared.size} / ${forest.nodes.length}`}
           </div>
-          <div style={{ overflowX: "auto" }}>
+          <ForestViewport focusKey={`${difficulty}-${seed}-${recenterKey}`}>
             <ForestSVG
               forest={forest}
               visibleIds={game.visible}
@@ -1020,7 +1208,7 @@ export default function App() {
               tappableIds={tappableIds}
               onTap={onTap}
             />
-          </div>
+          </ForestViewport>
         </section>
 
         {won && (
@@ -1140,7 +1328,7 @@ export default function App() {
                     return (
                       <div
                         key={i}
-                        title={`creation #${i + 1}  ·  activates #${activationIdx + 1}  ·  ${b.color}`}
+                        title={`creation #${i + 1}  ·  activates #${activationIdx + 1}  ·  ${yarnTitle(b.color)}`}
                         style={{
                           border: "1.5px solid #2a1d10",
                           background: "#fbf3df",
@@ -1169,7 +1357,7 @@ export default function App() {
                                 width: 14,
                                 height: 14,
                                 borderRadius: "50%",
-                                background: b.color,
+                                ...yarnFillStyle(b.color),
                                 border: "1.4px solid #2a1d10",
                               }}
                             />
@@ -1207,7 +1395,7 @@ export default function App() {
                               left: 0,
                               right: 0,
                               height: `${pct}%`,
-                              background: i === 0 ? "#e63946" : "#f4a261",
+                              background: i === 0 ? YARN_COLORS[0].hex : YARN_COLORS[1].hex,
                               transition: "height 200ms ease",
                             }}
                           />
@@ -1240,6 +1428,164 @@ export default function App() {
 // ────────────────────────────────────────────────────────────────────────────
 // SUB-COMPONENTS
 // ────────────────────────────────────────────────────────────────────────────
+
+function ForestViewport({ children, focusKey }) {
+  const ref = useRef(null);
+  const dragRef = useRef(null);
+  const [zoom, setZoom] = useState(1);
+  const canZoomOut = zoom > 0.36;
+  const canZoomIn = zoom < 0.99;
+
+  const recenter = useCallback(() => {
+    const viewport = ref.current;
+    if (!viewport) return;
+    viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+    viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2);
+  }, []);
+
+  const updateZoom = useCallback((nextZoom) => {
+    setZoom((currentZoom) => {
+      const viewport = ref.current;
+      const clampedZoom = Math.max(0.35, Math.min(1, nextZoom));
+      if (!viewport || clampedZoom === currentZoom) return clampedZoom;
+
+      const centerX = viewport.scrollLeft + viewport.clientWidth / 2;
+      const centerY = viewport.scrollTop + viewport.clientHeight / 2;
+      const ratio = clampedZoom / currentZoom;
+      requestAnimationFrame(() => {
+        viewport.scrollLeft = centerX * ratio - viewport.clientWidth / 2;
+        viewport.scrollTop = centerY * ratio - viewport.clientHeight / 2;
+      });
+      return clampedZoom;
+    });
+  }, []);
+
+  useEffect(() => {
+    setZoom(1);
+    requestAnimationFrame(recenter);
+  }, [focusKey, recenter]);
+
+  const onPointerDown = useCallback((event) => {
+    if (event.button !== 0) return;
+    if (event.target.closest?.("[data-yarn-node='true']")) return;
+    const viewport = ref.current;
+    if (!viewport) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+      moved: false,
+    };
+    viewport.setPointerCapture(event.pointerId);
+  }, []);
+
+  const onPointerMove = useCallback((event) => {
+    const drag = dragRef.current;
+    const viewport = ref.current;
+    if (!drag || !viewport || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (Math.hypot(dx, dy) > 4) drag.moved = true;
+    viewport.scrollLeft = drag.scrollLeft - dx;
+    viewport.scrollTop = drag.scrollTop - dy;
+  }, []);
+
+  const endPointerDrag = useCallback((event) => {
+    const drag = dragRef.current;
+    const viewport = ref.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (viewport?.hasPointerCapture(event.pointerId)) {
+      viewport.releasePointerCapture(event.pointerId);
+    }
+    requestAnimationFrame(() => {
+      if (dragRef.current === drag) dragRef.current = null;
+    });
+  }, []);
+
+  const onClickCapture = useCallback((event) => {
+    if (!dragRef.current?.moved) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const onWheel = useCallback(
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -0.08 : 0.08;
+      updateZoom(zoom + delta);
+    },
+    [updateZoom, zoom]
+  );
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        ref={ref}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPointerDrag}
+        onPointerCancel={endPointerDrag}
+        onClickCapture={onClickCapture}
+        onWheel={onWheel}
+        style={{
+          height: "clamp(360px, 58vh, 640px)",
+          overflow: "auto",
+          overscrollBehavior: "contain",
+          WebkitOverflowScrolling: "touch",
+          cursor: "grab",
+          touchAction: "none",
+          userSelect: "none",
+        }}
+      >
+        <div
+          style={{
+            display: "inline-block",
+            zoom,
+            minWidth: "100%",
+          }}
+        >
+          {children}
+        </div>
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          right: 10,
+          bottom: 10,
+          display: "flex",
+          gap: 4,
+          padding: 4,
+          background: "rgba(251, 243, 223, 0.86)",
+          border: "1.5px solid #2a1d10",
+          boxShadow: "2px 2px 0 rgba(42, 29, 16, 0.24)",
+        }}
+      >
+        <button
+          className="ypmapbtn"
+          disabled={!canZoomOut}
+          onClick={() => updateZoom(zoom - 0.12)}
+          title="Zoom out"
+        >
+          -
+        </button>
+        <button className="ypmapbtn" onClick={recenter} title="Recenter">
+          ⊙
+        </button>
+        <button
+          className="ypmapbtn"
+          disabled={!canZoomIn}
+          onClick={() => updateZoom(zoom + 0.12)}
+          title="Zoom toward default"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function DebugLabel({ children, small }) {
   return (
@@ -1286,12 +1632,12 @@ function QueuePeek({ queue }) {
       {queue.slice(0, 12).map((b, i) => (
         <div
           key={i}
-          title={b.color}
+          title={yarnTitle(b.color)}
           style={{
             width: 16,
             height: 16,
             borderRadius: "50%",
-            background: b.color,
+            ...yarnFillStyle(b.color),
             border: "1.4px solid #2a1d10",
             opacity: 1 - i * 0.045,
           }}
@@ -1374,9 +1720,10 @@ function BasketCell({ basket }) {
 
   return (
     <div
+      title={yarnTitle(basket.color)}
       style={{
         border: "1.5px solid #2a1d10",
-        background: basket.color,
+        ...yarnFillStyle(basket.color),
         padding: "5px 6px",
         boxShadow: "2px 2px 0 rgba(42, 29, 16, 0.34)",
         display: "flex",
@@ -1413,7 +1760,7 @@ function BasketCell({ basket }) {
                     width: "72%",
                     height: "72%",
                     borderRadius: "50%",
-                    background: basket.color,
+                    ...yarnFillStyle(basket.color),
                     border: "1.4px solid #2a1d10",
                     boxShadow: "inset 0 0 0 3px rgba(251, 243, 223, 0.5)",
                   }}
@@ -1442,12 +1789,13 @@ function SpoolsRow({ spools }) {
       {spools.map((color, i) => (
         <div
           key={i}
+          title={color ? yarnTitle(color) : `empty spool ${i + 1}`}
           style={{
             width: 28,
             height: 28,
             border: "1.5px solid rgba(42, 29, 16, 0.7)",
             borderRadius: "50%",
-            background: color || "rgba(42, 29, 16, 0.035)",
+            ...(color ? yarnFillStyle(color) : { background: "rgba(42, 29, 16, 0.035)" }),
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1461,7 +1809,7 @@ function SpoolsRow({ spools }) {
                 position: "absolute",
                 inset: 3,
                 borderRadius: "50%",
-                background: color,
+                ...yarnFillStyle(color),
                 border: "1.25px solid #2a1d10",
                 boxShadow: "inset 0 0 0 3px rgba(251, 243, 223, 0.45)",
               }}
