@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ball Sort</title>
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="expires" content="0">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0d0d12;
+    --surface: #16161f;
+    --border: #2a2a3a;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --accent: #7c6ff7;
+    --success: #4ade80;
+    --tube-w: 60px;
+    --tube-h: 220px;
+    --ball-size: 48px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *:focus { outline: none; }
+  *:focus-visible { outline: none; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Subtle grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(124,111,247,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,111,247,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 32px;
+    position: relative;
+    z-index: 1;
+  }
+
+  header h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #fff 30%, var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .meta {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    margin-top: 8px;
+  }
+
+  .meta span {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .meta strong {
+    color: var(--text);
+  }
+
+  /* GAME AREA */
+  #game {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+    position: relative;
+    z-index: 1;
+    max-width: 700px;
+  }
+
+  .tube {
+    width: var(--tube-w);
+    height: var(--tube-h);
+    border: 2px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 30px 30px;
+    position: relative;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: center;
+    padding-bottom: 4px;
+    gap: 3px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.015);
+    outline: none;
+  }
+
+  .tube-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    outline: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .tube-wrap:focus,
+  .tube-wrap:focus-visible,
+  .tube-wrap *:focus,
+  .tube-wrap *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .tube-wrap:hover .tube {
+    /* no highlight on hover */
+  }
+
+  .tube-wrap.selected .tube {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px rgba(124,111,247,0.3), inset 0 0 20px rgba(124,111,247,0.05);
+  }
+
+
+
+
+  /* tube top rim */
+  .tube::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -2px; right: -2px;
+    height: 3px;
+    background: transparent;
+    border-left: 2px solid var(--border);
+    border-right: 2px solid var(--border);
+    transition: border-color 0.15s;
+  }
+
+  .tube-wrap.selected .tube::before { border-color: var(--accent); }
+
+  /* BALL */
+  .ball {
+    width: var(--ball-size);
+    height: var(--ball-size);
+    border-radius: 50%;
+    position: relative;
+    flex-shrink: 0;
+    transition: transform 0.12s ease;
+  }
+
+  .ball::after {
+    content: '';
+    position: absolute;
+    top: 20%;
+    left: 22%;
+    width: 30%;
+    height: 25%;
+    background: rgba(255,255,255,0.4);
+    border-radius: 50%;
+    transform: rotate(-35deg);
+    filter: blur(2px);
+  }
+
+  /* floating ball for animation */
+  .ball-flying {
+    position: fixed;
+    width: var(--ball-size);
+    height: var(--ball-size);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 1000;
+    transition: none;
+  }
+
+  .ball-flying::after {
+    content: '';
+    position: absolute;
+    top: 20%;
+    left: 22%;
+    width: 30%;
+    height: 25%;
+    background: rgba(255,255,255,0.4);
+    border-radius: 50%;
+    transform: rotate(-35deg);
+    filter: blur(2px);
+  }
+
+  /* BALL COLORS */
+  .c0  { background: radial-gradient(circle at 35% 35%, #ff4444, #b50000); }  /* red */
+  .c1  { background: radial-gradient(circle at 35% 35%, #ff7c2a, #c94a00); }  /* orange */
+  .c2  { background: radial-gradient(circle at 35% 35%, #ffe566, #f5c800); }  /* yellow */
+  .c3  { background: radial-gradient(circle at 35% 35%, #44d44a, #1a8c1e); }  /* green */
+  .c4  { background: radial-gradient(circle at 35% 35%, #3b82f6, #1a3ab8); }  /* blue */
+  .c5  { background: radial-gradient(circle at 35% 35%, #b04aff, #6b00cc); }  /* purple */
+  .c6  { background: radial-gradient(circle at 35% 35%, #ff2aab, #aa005c); }  /* magenta */
+  .c7  { background: radial-gradient(circle at 35% 35%, #00e5ff, #0099bb); }  /* cyan */
+
+  /* BUTTONS */
+  .controls {
+    display: flex;
+    gap: 12px;
+    margin-top: 32px;
+    position: relative;
+    z-index: 1;
+  }
+
+  button {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  button:hover {
+    border-color: var(--accent);
+    background: rgba(124,111,247,0.1);
+    color: #fff;
+  }
+
+  button.primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  button.primary:hover {
+    background: #9b93fa;
+    box-shadow: 0 0 20px rgba(124,111,247,0.4);
+  }
+
+  /* DIFFICULTY */
+  .difficulty {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .diff-btn {
+    font-size: 0.65rem;
+    padding: 6px 14px;
+  }
+
+  .diff-btn.active {
+    border-color: var(--accent);
+    background: rgba(124,111,247,0.2);
+    color: var(--accent);
+  }
+
+  /* STUCK BANNER */
+  #stuck-banner {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #ff4444;
+    border: 1px solid rgba(255,68,68,0.3);
+    background: rgba(255,68,68,0.08);
+    border-radius: 6px;
+    padding: 8px 18px;
+    margin-top: 14px;
+    position: relative;
+    z-index: 1;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+
+  #stuck-banner.show {
+    opacity: 1;
+  }
+  #win-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(13,13,18,0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+    backdrop-filter: blur(6px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+
+  #win-overlay.show {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .win-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 48px 56px;
+    text-align: center;
+    transform: translateY(20px);
+    transition: transform 0.4s 0.1s;
+  }
+
+  #win-overlay.show .win-card {
+    transform: translateY(0);
+  }
+
+  .win-card h2 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #4ade80, #7c6ff7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 8px;
+  }
+
+  .win-card p {
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.78rem;
+    margin-bottom: 32px;
+  }
+
+  /* confetti */
+  .confetti-piece {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 600;
+    animation: confettiFall linear forwards;
+  }
+
+  @keyframes confettiFall {
+    0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+  }
+
+  /* tube label */
+  .tube-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.55rem;
+    color: var(--border);
+    letter-spacing: 0.05em;
+  }
+
+  /* bounce animation when ball lands */
+  @keyframes ballLand {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.15, 0.85); }
+    70%  { transform: scale(0.95, 1.05); }
+    100% { transform: scale(1); }
+  }
+
+  .ball.landing {
+    animation: ballLand 0.3s ease-out;
+  }
+
+  /* shake on invalid move */
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%       { transform: translateX(-6px); }
+    40%       { transform: translateX(6px); }
+    60%       { transform: translateX(-4px); }
+    80%       { transform: translateX(4px); }
+  }
+
+  .tube-wrap.invalid {
+    animation: shake 0.35s ease;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Ball Sort</h1>
+  <div class="meta">
+    <span>Moves: <strong id="move-count">0</strong></span>
+    <span>Level: <strong id="level-num">1</strong></span>
+  </div>
+</header>
+
+<div class="difficulty">
+  <button class="diff-btn active" data-colors="4" data-extra="1">Easy</button>
+  <button class="diff-btn" data-colors="5" data-extra="2">Medium</button>
+  <button class="diff-btn" data-colors="6" data-extra="2">Hard</button>
+  <button class="diff-btn" data-colors="8" data-extra="2">Expert</button>
+</div>
+
+<div id="game"></div>
+
+<div class="controls">
+  <button id="undo-btn">↩ Undo</button>
+  <button id="reset-btn">↺ Reset</button>
+  <button class="primary" id="new-btn">New Game</button>
+</div>
+
+<div id="stuck-banner">No moves left — try Undo or Reset</div>
+
+<div id="win-overlay">
+  <div class="win-card">
+    <h2>Solved!</h2>
+    <p id="win-msg">in 0 moves</p>
+    <button class="primary" id="next-btn">Next Level →</button>
+  </div>
+</div>
+
+<script>
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const TUBE_CAPACITY = 4;
+
+let numColors = 4;
+let numExtra  = 1;
+let tubes     = [];
+let selected  = -1;
+let moves     = 0;
+let level     = 1;
+let history   = []; // for undo
+
+// ─── LEVEL GENERATION ────────────────────────────────────────────────────────
+function generateLevel(colors, extra) {
+  const numTubes = colors + extra;
+
+  // Start from a solved state
+  let state = [];
+  for (let c = 0; c < colors; c++) {
+    state.push(Array(TUBE_CAPACITY).fill(c));
+  }
+  for (let e = 0; e < extra; e++) {
+    state.push([]);
+  }
+
+  // Scramble by performing many random valid reverse-moves
+  // A "reverse move" = pick the top ball of a non-full, non-solved tube
+  // and move it to another tube that has room, isn't complete, etc.
+  const shuffleIter = colors * TUBE_CAPACITY * 20;
+
+  for (let i = 0; i < shuffleIter; i++) {
+    // find tubes that can give a ball (not empty)
+    const givers = state.map((t, i) => i).filter(i => state[i].length > 0);
+    // find tubes that can receive (not full)
+    const receivers = state.map((t, i) => i).filter(i => state[i].length < TUBE_CAPACITY);
+
+    if (givers.length === 0 || receivers.length === 0) break;
+
+    const from = givers[Math.floor(Math.random() * givers.length)];
+    let toPool = receivers.filter(r => r !== from);
+    if (toPool.length === 0) continue;
+    const to = toPool[Math.floor(Math.random() * toPool.length)];
+
+    // Move top ball
+    const ball = state[from][state[from].length - 1];
+    state[from].pop();
+    state[to].push(ball);
+  }
+
+  // Ensure it's not accidentally solved
+  // (extremely unlikely but let's check)
+  if (isSolved(state)) return generateLevel(colors, extra);
+
+  return state;
+}
+
+function isSolved(state) {
+  for (const tube of state) {
+    if (tube.length === 0) continue;
+    if (tube.length !== TUBE_CAPACITY) return false;
+    if (!tube.every(b => b === tube[0])) return false;
+  }
+  return true;
+}
+
+function isTubeComplete(tube) {
+  return tube.length === TUBE_CAPACITY && tube.length > 0 && tube.every(b => b === tube[0]);
+}
+
+function isStuck() {
+  for (let i = 0; i < tubes.length; i++) {
+    for (let j = 0; j < tubes.length; j++) {
+      if (canPour(i, j)) return false;
+    }
+  }
+  return true;
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function render() {
+  const game = document.getElementById('game');
+  game.innerHTML = '';
+
+  tubes.forEach((tube, ti) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'tube-wrap' +
+      (ti === selected ? ' selected' : '');
+
+    const tubeEl = document.createElement('div');
+    tubeEl.className = 'tube';
+
+    for (let i = 0; i < tube.length; i++) {
+      const ball = document.createElement('div');
+      ball.className = `ball c${tube[i]}`;
+      tubeEl.appendChild(ball);
+    }
+
+    wrap.appendChild(tubeEl);
+    wrap.addEventListener('click', () => onTubeClick(ti));
+    game.appendChild(wrap);
+  });
+
+  document.getElementById('move-count').textContent = moves;
+  document.getElementById('stuck-banner').classList.toggle('show', !isSolved(tubes) && isStuck());
+}
+
+// ─── GAME LOGIC ───────────────────────────────────────────────────────────────
+function getGroupSize(tubeIndex) {
+  const tube = tubes[tubeIndex];
+  if (tube.length === 0) return 0;
+  const topColor = tube[tube.length - 1];
+  let count = 0;
+  for (let i = tube.length - 1; i >= 0; i--) {
+    if (tube[i] === topColor) count++;
+    else break;
+  }
+  return count;
+}
+
+function canPour(from, to) {
+  if (from === to) return false;
+  if (tubes[from].length === 0) return false;
+  if (tubes[to].length === TUBE_CAPACITY) return false;
+  const topFrom = tubes[from][tubes[from].length - 1];
+  const groupSize = getGroupSize(from);
+  const spaceInTo = TUBE_CAPACITY - tubes[to].length;
+  // Destination must have room for the entire group
+  if (spaceInTo < groupSize) return false;
+  if (tubes[to].length === 0) return true;
+  const topTo = tubes[to][tubes[to].length - 1];
+  return topFrom === topTo;
+}
+
+function pour(from, to) {
+  const color = tubes[from][tubes[from].length - 1];
+  // Move all matching top balls
+  while (
+    tubes[from].length > 0 &&
+    tubes[to].length < TUBE_CAPACITY &&
+    tubes[from][tubes[from].length - 1] === color
+  ) {
+    tubes[to].push(tubes[from].pop());
+  }
+}
+
+function findUniqueTarget(from) {
+  const targets = [];
+  for (let i = 0; i < tubes.length; i++) {
+    if (canPour(from, i)) targets.push(i);
+  }
+  return targets.length === 1 ? targets[0] : -1;
+}
+
+let pendingSingleClick = null; // { ti, timer }
+
+function onTubeClick(ti) {
+  // If there's a pending single-click on the SAME tube, this is a double-click
+  if (pendingSingleClick && pendingSingleClick.ti === ti) {
+    clearTimeout(pendingSingleClick.timer);
+    pendingSingleClick = null;
+    handleDoubleClick(ti);
+    return;
+  }
+
+  // Cancel any pending single-click on a different tube and act on it immediately
+  if (pendingSingleClick) {
+    clearTimeout(pendingSingleClick.timer);
+    const prev = pendingSingleClick.ti;
+    pendingSingleClick = null;
+    handleSingleClick(prev);
+  }
+
+  // Queue this click — wait to see if a second tap comes
+  const timer = setTimeout(() => {
+    pendingSingleClick = null;
+    handleSingleClick(ti);
+  }, 250);
+  pendingSingleClick = { ti, timer };
+}
+
+async function handleDoubleClick(ti) {
+  if (tubes[ti].length === 0) return;
+  if (isTubeComplete(tubes[ti])) return;
+  // Only auto-move if there's exactly one valid target
+  const target = findUniqueTarget(ti);
+  if (target === -1) {
+    // No unique target — fall back to selecting the tube
+    selected = ti;
+    render();
+    return;
+  }
+  selected = -1;
+  history.push(tubes.map(t => [...t]));
+  render();
+  await animatePour(ti, target);
+  pour(ti, target);
+  moves++;
+  render();
+  landingEffect(target);
+  if (isSolved(tubes)) setTimeout(showWin, 350);
+}
+
+async function handleSingleClick(ti) {
+  if (selected === -1) {
+    if (tubes[ti].length === 0) return;
+    if (isTubeComplete(tubes[ti])) return;
+    selected = ti;
+    render();
+  } else {
+    if (ti === selected) {
+      selected = -1;
+      render();
+      return;
+    }
+
+    if (!canPour(selected, ti)) {
+      const wraps = document.querySelectorAll('.tube-wrap');
+      wraps[ti].classList.add('invalid');
+      setTimeout(() => wraps[ti].classList.remove('invalid'), 400);
+      selected = -1;
+      render();
+      return;
+    }
+
+    history.push(tubes.map(t => [...t]));
+    const fromTube = selected;
+    selected = -1;
+    render();
+    await animatePour(fromTube, ti);
+    pour(fromTube, ti);
+    moves++;
+    render();
+    landingEffect(ti);
+    if (isSolved(tubes)) setTimeout(showWin, 350);
+  }
+}
+
+function landingEffect(ti) {
+  setTimeout(() => {
+    const wraps = document.querySelectorAll('.tube-wrap');
+    const destBalls = wraps[ti].querySelectorAll('.ball');
+    if (destBalls.length > 0) {
+      const topBall = destBalls[destBalls.length - 1];
+      topBall.classList.add('landing');
+      setTimeout(() => topBall.classList.remove('landing'), 400);
+    }
+  }, 20);
+}
+
+// ─── ANIMATION ────────────────────────────────────────────────────────────────
+function getTubeRect(ti) {
+  const wraps = document.querySelectorAll('.tube-wrap');
+  const tubeEl = wraps[ti].querySelector('.tube');
+  return tubeEl.getBoundingClientRect();
+}
+
+function getTopBallColor(ti) {
+  const t = tubes[ti];
+  if (t.length === 0) return null;
+  return t[t.length - 1];
+}
+
+async function animatePour(from, to) {
+  const fromRect = getTubeRect(from);
+  const toRect   = getTubeRect(to);
+  const color = getTopBallColor(from);
+
+  // Count how many balls will move
+  let count = 0;
+  const topColor = tubes[from][tubes[from].length - 1];
+  for (let i = tubes[from].length - 1; i >= 0; i--) {
+    if (tubes[from][i] === topColor && tubes[to].length + count < TUBE_CAPACITY) count++;
+    else break;
+  }
+
+  const ballSize = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--ball-size'));
+  const gap = 3;
+
+  // Starting y: position of the topmost ball in `from`
+  const fromTopBallY = fromRect.bottom - 4 - (tubes[from].length) * (ballSize + gap) + (ballSize + gap) * (tubes[from].length - 1) - (ballSize + gap) * (count - 1);
+
+  // Destination y: where the ball will land in `to`
+  const destBallIndex = tubes[to].length; // 0-based
+  const toTopBallY = toRect.bottom - 4 - (destBallIndex + count) * (ballSize + gap);
+
+  const startX = fromRect.left + fromRect.width / 2 - ballSize / 2;
+  const startY = fromRect.top - ballSize - 4; // lift above tube
+
+  const destX  = toRect.left + toRect.width / 2 - ballSize / 2;
+  const destY  = toTopBallY;
+
+  // Animate count balls flying
+  const promises = [];
+  for (let i = 0; i < count; i++) {
+    const delay = i * 60;
+    const p = new Promise(resolve => {
+      setTimeout(() => {
+        const fly = document.createElement('div');
+        fly.className = `ball-flying c${color}`;
+        fly.style.left  = `${startX}px`;
+        fly.style.top   = `${startY}px`;
+        document.body.appendChild(fly);
+
+        // Use Web Animations API for smooth arc
+        const midX = (startX + destX) / 2;
+        const midY = Math.min(startY, destY) - 60;
+
+        fly.animate([
+          { left: `${startX}px`, top: `${startY}px`, easing: 'ease-in' },
+          { left: `${midX}px`,   top: `${midY}px`,   easing: 'ease-out' },
+          { left: `${destX}px`,  top: `${destY + i * (ballSize + gap)}px` }
+        ], {
+          duration: 280,
+          fill: 'forwards'
+        }).onfinish = () => {
+          fly.remove();
+          resolve();
+        };
+      }, delay);
+    });
+    promises.push(p);
+  }
+
+  await Promise.all(promises);
+}
+
+// ─── WIN ──────────────────────────────────────────────────────────────────────
+function showWin() {
+  document.getElementById('win-msg').textContent = `in ${moves} move${moves !== 1 ? 's' : ''}`;
+  document.getElementById('win-overlay').classList.add('show');
+  spawnConfetti();
+}
+
+function spawnConfetti() {
+  const colors = ['#ff6b6b','#ffa94d','#ffe066','#69db7c','#4dabf7','#a78bfa','#f687b3','#5eead4'];
+  for (let i = 0; i < 80; i++) {
+    setTimeout(() => {
+      const c = document.createElement('div');
+      c.className = 'confetti-piece';
+      c.style.left = `${Math.random() * 100}vw`;
+      c.style.top  = `-10px`;
+      c.style.background = colors[Math.floor(Math.random() * colors.length)];
+      c.style.width  = `${6 + Math.random() * 8}px`;
+      c.style.height = `${6 + Math.random() * 8}px`;
+      c.style.animationDuration = `${1.5 + Math.random() * 2}s`;
+      c.style.animationDelay = `0s`;
+      document.body.appendChild(c);
+      setTimeout(() => c.remove(), 4000);
+    }, i * 30);
+  }
+}
+
+// ─── UNDO ─────────────────────────────────────────────────────────────────────
+function undo() {
+  if (history.length === 0) return;
+  tubes = history.pop();
+  moves = Math.max(0, moves - 1);
+  selected = -1;
+  render();
+}
+
+// ─── NEW GAME ─────────────────────────────────────────────────────────────────
+let initialTubes = [];
+
+function newGame() {
+  document.getElementById('win-overlay').classList.remove('show');
+  tubes        = generateLevel(numColors, numExtra);
+  initialTubes = tubes.map(t => [...t]);
+  selected     = -1;
+  moves        = 0;
+  history      = [];
+  render();
+  document.getElementById('level-num').textContent = level;
+}
+
+function resetLevel() {
+  tubes    = initialTubes.map(t => [...t]);
+  selected = -1;
+  moves    = 0;
+  history  = [];
+  render();
+}
+
+// ─── CONTROLS ────────────────────────────────────────────────────────────────
+document.getElementById('new-btn').addEventListener('click', () => {
+  level++;
+  newGame();
+});
+
+document.getElementById('undo-btn').addEventListener('click', undo);
+document.getElementById('reset-btn').addEventListener('click', resetLevel);
+
+document.getElementById('next-btn').addEventListener('click', () => {
+  level++;
+  newGame();
+});
+
+document.querySelectorAll('.diff-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    numColors = parseInt(btn.dataset.colors);
+    numExtra  = parseInt(btn.dataset.extra);
+    level = 1;
+    newGame();
+  });
+});
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+newGame();
+</script>
+</body>
+</html>
