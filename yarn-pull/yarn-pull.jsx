@@ -90,8 +90,8 @@ const PALETTE = [
   "#3a86ff", // cobalt
   "#7b4bd6", // grape
   "#ff5d8f", // bubblegum
-  "#5e3a1f", // chocolate
-  "#1d3557", // navy
+  "#a76f3d", // caramel
+  "#4c6fbf", // cornflower
 ];
 
 function colorForestAndMakeBaskets(forest, rng) {
@@ -339,8 +339,11 @@ function buildInitialGameStateFromActivationOrder(activationOrder, spoolCapacity
   return { queue, active, spools: new Array(spoolCapacity).fill(null) };
 }
 
-function buildInitialGameState(forest, baskets) {
-  const routed = buildInitialGameStateFromActivationOrder(baskets.slice().reverse());
+function buildInitialGameState(forest, baskets, spoolCapacity = NUM_SPOOLS) {
+  const routed = buildInitialGameStateFromActivationOrder(
+    baskets.slice().reverse(),
+    spoolCapacity
+  );
   const visible = new Set(forest.rootIds);
   const cleared = new Set();
   return { ...routed, visible, cleared };
@@ -551,12 +554,12 @@ function replayTrace(forest, activationOrder, trace, spoolCapacity) {
   };
 }
 
-function pressureIsInTarget(metrics) {
+function pressureIsInTarget(metrics, target = PRESSURE_TARGET) {
   return (
     metrics.ok &&
-    metrics.spoolPlacements >= PRESSURE_TARGET.minPlacements &&
-    metrics.spoolPlacements <= PRESSURE_TARGET.maxPlacements &&
-    metrics.peakSpoolOccupancy <= PRESSURE_TARGET.maxPeak
+    metrics.spoolPlacements >= target.minPlacements &&
+    metrics.spoolPlacements <= target.maxPlacements &&
+    metrics.peakSpoolOccupancy <= target.maxPeak
   );
 }
 
@@ -617,7 +620,10 @@ function shuffleCopy(items, rng) {
   return copy;
 }
 
-function addSpoolPressure(forest, baskets, rng) {
+function addSpoolPressure(forest, baskets, rng, opts = {}) {
+  const spoolCapacity = opts.spoolCapacity ?? NUM_SPOOLS;
+  const pressureTarget = opts.pressureTarget ?? PRESSURE_TARGET;
+  const maxLag = opts.maxLag ?? 8;
   const safeActivationOrder = baskets.slice().reverse();
   const safePreference = makeSafePreferenceOrder(baskets);
   const safeSolve = solveWithPreferredOrder(forest, safeActivationOrder, safePreference, 0);
@@ -633,16 +639,17 @@ function addSpoolPressure(forest, baskets, rng) {
   const candidateBudget = forest.nodes.length > 90 ? 18 : forest.nodes.length > 60 ? 36 : 72;
   const zeroSpoolStateBudget =
     forest.nodes.length > 90 ? 300 : forest.nodes.length > 60 ? 1200 : 4000;
+  let bestPressured = null;
 
   for (const nodeId of candidateEvents) {
     const basketId = forest.nodes[nodeId].basketId;
     const fromIdx = safeActivationOrder.findIndex((b) => b.id === basketId);
     if (fromIdx === -1) continue;
 
-    for (let lag = 1; lag <= 8; lag++) {
+    for (let lag = 1; lag <= maxLag; lag++) {
       checkedCandidates++;
       if (checkedCandidates > candidateBudget) {
-        return {
+        return bestPressured || {
           baskets,
           metrics: { pressured: false, reason: "pressure-search-budget-exhausted" },
         };
@@ -651,13 +658,13 @@ function addSpoolPressure(forest, baskets, rng) {
       if (toIdx === fromIdx) continue;
 
       const candidateOrder = moveBasket(safeActivationOrder, fromIdx, toIdx);
-      const replay = replayTrace(forest, candidateOrder, safeSolve.trace, NUM_SPOOLS);
-      if (!pressureIsInTarget(replay)) continue;
+      const replay = replayTrace(forest, candidateOrder, safeSolve.trace, spoolCapacity);
+      if (!replay.ok || replay.peakSpoolOccupancy > pressureTarget.maxPeak) continue;
 
       const zeroSpool = hasZeroSpoolSolution(forest, candidateOrder, zeroSpoolStateBudget);
       if (zeroSpool !== false) continue;
 
-      return {
+      const pressuredCandidate = {
         baskets: candidateOrder.slice().reverse(),
         metrics: {
           pressured: true,
@@ -666,13 +673,27 @@ function addSpoolPressure(forest, baskets, rng) {
           zeroSpoolRejected: true,
         },
       };
+
+      if (pressureIsInTarget(replay, pressureTarget)) return pressuredCandidate;
+
+      if (
+        !bestPressured ||
+        replay.spoolPlacements > bestPressured.metrics.spoolPlacements ||
+        (replay.spoolPlacements === bestPressured.metrics.spoolPlacements &&
+          replay.peakSpoolOccupancy > bestPressured.metrics.peakSpoolOccupancy)
+      ) {
+        bestPressured = pressuredCandidate;
+      }
     }
   }
 
-  return { baskets, metrics: { pressured: false, reason: "no-certified-pressure-order" } };
+  return bestPressured || {
+    baskets,
+    metrics: { pressured: false, reason: "no-certified-pressure-order" },
+  };
 }
 
-function generatePressuredPuzzle({ numBaskets, seed }) {
+function generatePressuredPuzzle({ numBaskets, seed, spoolCapacity, pressureTarget, maxLag }) {
   let fallback = null;
   for (let attempt = 0; attempt < 8; attempt++) {
     const attemptSeed = (seed + attempt * 7919) >>> 0;
@@ -680,7 +701,11 @@ function generatePressuredPuzzle({ numBaskets, seed }) {
     const colorRng = makeRng(attemptSeed ^ 0xb45c0107);
     const baskets = colorForestAndMakeBaskets(forest, colorRng);
     const pressureRng = makeRng(attemptSeed ^ 0x91e10da5);
-    const pressured = addSpoolPressure(forest, baskets, pressureRng);
+    const pressured = addSpoolPressure(forest, baskets, pressureRng, {
+      spoolCapacity,
+      pressureTarget,
+      maxLag,
+    });
     if (!fallback) fallback = { forest, baskets, pressure: pressured.metrics };
     if (pressured.metrics.pressured) {
       return { forest, baskets: pressured.baskets, pressure: pressured.metrics };
@@ -696,31 +721,74 @@ function generatePressuredPuzzle({ numBaskets, seed }) {
 const FONT_DISPLAY = `"Fraunces", "Cormorant Garamond", "Iowan Old Style", Georgia, serif`;
 const FONT_BODY = `"Inter Tight", "Söhne", "Helvetica Neue", system-ui, sans-serif`;
 const FONT_MONO = `"JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace`;
+const DIFFICULTIES = [
+  {
+    id: "easy",
+    label: "Easy",
+    baskets: 12,
+    spools: 5,
+    pressureTarget: { minPlacements: 1, maxPlacements: 3, maxPeak: 3 },
+    maxLag: 8,
+  },
+  {
+    id: "medium",
+    label: "Medium",
+    baskets: 18,
+    spools: 4,
+    pressureTarget: { minPlacements: 2, maxPlacements: 5, maxPeak: 4 },
+    maxLag: 12,
+  },
+  {
+    id: "hard",
+    label: "Hard",
+    baskets: 24,
+    spools: 3,
+    pressureTarget: { minPlacements: 3, maxPlacements: 7, maxPeak: 3 },
+    maxLag: 16,
+  },
+];
 
 export default function App() {
-  const [numBaskets, setNumBaskets] = useState(12);
+  const [difficulty, setDifficulty] = useState("medium");
   const [seed, setSeed] = useState(42);
   const [debugOpen, setDebugOpen] = useState(false);
   const [shake, setShake] = useState(0);
+  const difficultyConfig =
+    DIFFICULTIES.find((option) => option.id === difficulty) || DIFFICULTIES[1];
+  const numBaskets = difficultyConfig.baskets;
 
   const { forest, baskets, pressure } = useMemo(
-    () => generatePressuredPuzzle({ numBaskets, seed }),
-    [numBaskets, seed]
+    () =>
+      generatePressuredPuzzle({
+        numBaskets,
+        seed,
+        spoolCapacity: difficultyConfig.spools,
+        pressureTarget: difficultyConfig.pressureTarget,
+        maxLag: difficultyConfig.maxLag,
+      }),
+    [numBaskets, seed, difficultyConfig]
   );
 
-  const [game, setGame] = useState(() => buildInitialGameState(forest, baskets));
+  const [game, setGame] = useState(() =>
+    buildInitialGameState(forest, baskets, difficultyConfig.spools)
+  );
 
   useEffect(() => {
-    setGame(buildInitialGameState(forest, baskets));
-  }, [forest, baskets]);
+    setGame(buildInitialGameState(forest, baskets, difficultyConfig.spools));
+  }, [forest, baskets, difficultyConfig.spools]);
 
   const reroll = useCallback(() => {
     setSeed(Math.floor(Math.random() * 1_000_000));
   }, []);
 
+  const changeDifficulty = useCallback((nextDifficulty) => {
+    setDifficulty(nextDifficulty);
+    setSeed(Math.floor(Math.random() * 1_000_000));
+  }, []);
+
   const restart = useCallback(() => {
-    setGame(buildInitialGameState(forest, baskets));
-  }, [forest, baskets]);
+    setGame(buildInitialGameState(forest, baskets, difficultyConfig.spools));
+  }, [forest, baskets, difficultyConfig.spools]);
 
   const tappableIds = useMemo(() => {
     const s = new Set();
@@ -785,6 +853,20 @@ export default function App() {
         button.ypbtn.ghost { background: transparent; color: #2a1d10; }
         button.ypbtn:hover { transform: translateY(-1px); }
         button.ypbtn.ghost:hover { background: #2a1d10; color: #f7ecd4; }
+        button.ypseg {
+          font-family: ${FONT_MONO};
+          font-size: 9px;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          padding: 7px 10px;
+          border: 0;
+          border-right: 1.5px solid #2a1d10;
+          background: transparent;
+          color: #2a1d10;
+          cursor: pointer;
+        }
+        button.ypseg:last-child { border-right: 0; }
+        button.ypseg.active { background: #2a1d10; color: #f7ecd4; }
         input[type=range].ypslider {
           -webkit-appearance: none; appearance: none;
           width: 220px; height: 2px; background: #2a1d10; outline: none;
@@ -817,18 +899,28 @@ export default function App() {
           100% { transform: scale(1); opacity: 1; }
         }
         .yp-pop { animation: yp-pop 280ms ease-out; transform-origin: center; }
+        .yp-baskets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        @media (max-width: 720px) {
+          .yp-header { align-items: flex-start !important; flex-direction: column; }
+          .yp-actions { width: 100%; }
+          .yp-actions .ypbtn { flex: 1; min-width: 0; padding-left: 10px; padding-right: 10px; }
+        }
+        @media (max-width: 460px) {
+          .yp-baskets { grid-template-columns: 1fr; }
+        }
       `}</style>
 
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ maxWidth: 1240, margin: "0 auto" }}>
         <header
+          className="yp-header"
           style={{
             display: "flex",
             alignItems: "flex-end",
             justifyContent: "space-between",
             gap: 24,
             borderBottom: "1.5px solid #2a1d10",
-            paddingBottom: 18,
-            marginBottom: 28,
+            paddingBottom: 14,
+            marginBottom: 18,
             flexWrap: "wrap",
           }}
         >
@@ -850,7 +942,7 @@ export default function App() {
                 fontFamily: FONT_DISPLAY,
                 fontWeight: 400,
                 fontStyle: "italic",
-                fontSize: "clamp(40px, 7vw, 72px)",
+                fontSize: "clamp(34px, 5.6vw, 58px)",
                 lineHeight: 0.95,
                 margin: 0,
                 letterSpacing: "-0.02em",
@@ -862,7 +954,24 @@ export default function App() {
               <span style={{ color: "#e63946" }}>.</span>
             </h1>
           </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div className="yp-actions" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div
+              aria-label="Difficulty"
+              style={{
+                display: "flex",
+                border: "1.5px solid #2a1d10",
+              }}
+            >
+              {DIFFICULTIES.map((option) => (
+                <button
+                  key={option.id}
+                  className={`ypseg${difficulty === option.id ? " active" : ""}`}
+                  onClick={() => changeDifficulty(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             <button className="ypbtn ghost" onClick={restart}>
               ↺ Restart
             </button>
@@ -878,55 +987,15 @@ export default function App() {
         {/* SPOOLS */}
         <SpoolsRow spools={game.spools} />
 
-        {/* QUEUE PEEK */}
-        {game.queue.length > 0 && (
-          <div
-            style={{
-              marginTop: 12,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              fontFamily: FONT_MONO,
-              fontSize: 10,
-              letterSpacing: "0.22em",
-              textTransform: "uppercase",
-              opacity: 0.7,
-            }}
-          >
-            <span>up next</span>
-            <div style={{ display: "flex", gap: 6 }}>
-              {game.queue.slice(0, 8).map((b, i) => (
-                <div
-                  key={i}
-                  title={b.color}
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: "50%",
-                    background: b.color,
-                    border: "1.4px solid #2a1d10",
-                    opacity: 1 - i * 0.08,
-                  }}
-                />
-              ))}
-              {game.queue.length > 8 && (
-                <span style={{ alignSelf: "center", marginLeft: 4 }}>
-                  +{game.queue.length - 8}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* FOREST CANVAS */}
         <section
           style={{
             background: "#fbf3df",
-            border: "1.5px solid #2a1d10",
-            padding: "12px 12px 4px",
+            border: "2px solid #2a1d10",
+            padding: "14px 14px 6px",
             position: "relative",
-            boxShadow: "6px 6px 0 #2a1d10",
-            marginTop: 20,
+            boxShadow: "8px 8px 0 #2a1d10",
+            marginTop: 16,
           }}
         >
           <div
@@ -985,55 +1054,26 @@ export default function App() {
             onClick={() => setDebugOpen((x) => !x)}
             style={{ width: "100%", textAlign: "left", padding: "12px 16px" }}
           >
-            {debugOpen ? "▾" : "▸"}  Debug · generation internals
+            {debugOpen ? "▾" : "▸"}  Debug · current puzzle
           </button>
 
           {debugOpen && (
             <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 28 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
-                <div>
-                  <DebugLabel>Baskets · {numBaskets}</DebugLabel>
-                  <input
-                    className="ypslider"
-                    type="range"
-                    min={9}
-                    max={99}
-                    value={numBaskets}
-                    onChange={(e) => setNumBaskets(parseInt(e.target.value, 10))}
-                  />
-                  <div style={{ fontFamily: FONT_MONO, fontSize: 11, marginTop: 6, opacity: 0.6 }}>
-                    target nodes = {numBaskets * 3}
-                  </div>
-                </div>
-                <div>
-                  <DebugLabel>Seed</DebugLabel>
-                  <input
-                    type="number"
-                    value={seed}
-                    onChange={(e) => setSeed(parseInt(e.target.value, 10) || 0)}
-                    style={{
-                      fontFamily: FONT_MONO,
-                      fontSize: 14,
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: "1.5px solid #2a1d10",
-                      color: "#2a1d10",
-                      padding: "4px 0",
-                      width: 160,
-                      outline: "none",
-                    }}
-                  />
-                </div>
+              <div>
+                <DebugLabel>Up next</DebugLabel>
+                <QueuePeek queue={game.queue} />
               </div>
 
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
+                  gridTemplateColumns: "repeat(6, 1fr)",
                   border: "1.5px solid #2a1d10",
                 }}
               >
                 {[
+                  ["Difficulty", difficultyConfig.label],
+                  ["Spools", difficultyConfig.spools],
                   ["Nodes", `${forest.actual} / ${forest.target}`],
                   ["Roots", stats.rootCount],
                   ["Leaves", stats.leafCount],
@@ -1048,7 +1088,7 @@ export default function App() {
                     key={label}
                     style={{
                       padding: "14px 16px",
-                      borderRight: i < 3 ? "1.5px solid #2a1d10" : "none",
+                      borderRight: i < 5 ? "1.5px solid #2a1d10" : "none",
                     }}
                   >
                     <DebugLabel small>{label}</DebugLabel>
@@ -1074,7 +1114,7 @@ export default function App() {
               </div>
 
               <div>
-                <DebugLabel>Baskets · creation order ({baskets.length})</DebugLabel>
+                <DebugLabel>Basket order</DebugLabel>
                 <div
                   style={{
                     fontFamily: FONT_MONO,
@@ -1218,15 +1258,73 @@ function DebugLabel({ children, small }) {
   );
 }
 
+function QueuePeek({ queue }) {
+  if (queue.length === 0) {
+    return (
+      <div
+        style={{
+          fontFamily: FONT_MONO,
+          fontSize: 10,
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          opacity: 0.45,
+        }}
+      >
+        no queued baskets
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      {queue.slice(0, 12).map((b, i) => (
+        <div
+          key={i}
+          title={b.color}
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            background: b.color,
+            border: "1.4px solid #2a1d10",
+            opacity: 1 - i * 0.045,
+          }}
+        />
+      ))}
+      {queue.length > 12 && (
+        <span
+          style={{
+            alignSelf: "center",
+            marginLeft: 4,
+            fontFamily: FONT_MONO,
+            fontSize: 10,
+            letterSpacing: "0.18em",
+            opacity: 0.6,
+          }}
+        >
+          +{queue.length - 12}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function BasketsRow({ active, shakeKey }) {
   return (
     <section
       key={`shake-${shakeKey}`}
-      className={shakeKey > 0 ? "yp-shake" : undefined}
+      className={`yp-baskets${shakeKey > 0 ? " yp-shake" : ""}`}
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(3, 1fr)",
-        gap: 14,
+        gap: 6,
+        maxWidth: 410,
+        margin: "0 auto",
       }}
     >
       {[0, 1, 2].map((i) => {
@@ -1247,21 +1345,29 @@ function BasketCell({ basket }) {
     return (
       <div
         style={{
-          border: "1.5px dashed #2a1d10",
+          border: "1.5px dashed rgba(42, 29, 16, 0.42)",
           background: "transparent",
-          padding: "16px 18px",
-          minHeight: 92,
+          padding: "5px 6px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          fontFamily: FONT_MONO,
-          fontSize: 10,
-          letterSpacing: "0.22em",
-          textTransform: "uppercase",
+          minHeight: 38,
           opacity: 0.4,
         }}
       >
-        — empty —
+        <div style={{ display: "flex", gap: 4, flex: 1, justifyContent: "center" }}>
+          {[0, 1, 2].map((s) => (
+            <div
+              key={s}
+              style={{
+                flex: 1,
+                aspectRatio: "1 / 1",
+                maxWidth: 28,
+                border: "1.5px dashed rgba(42, 29, 16, 0.46)",
+                borderRadius: "50%",
+              }}
+            />
+          ))}
+        </div>
       </div>
     );
   }
@@ -1270,26 +1376,16 @@ function BasketCell({ basket }) {
     <div
       style={{
         border: "1.5px solid #2a1d10",
-        background: "#fbf3df",
-        padding: "14px 16px",
-        boxShadow: `4px 4px 0 ${basket.color}`,
+        background: basket.color,
+        padding: "5px 6px",
+        boxShadow: "2px 2px 0 rgba(42, 29, 16, 0.34)",
         display: "flex",
         alignItems: "center",
-        gap: 14,
-        minHeight: 92,
+        minHeight: 38,
+        opacity: 0.92,
       }}
     >
-      <div
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: "50%",
-          background: basket.color,
-          border: "1.5px solid #2a1d10",
-          flexShrink: 0,
-        }}
-      />
-      <div style={{ display: "flex", gap: 8, flex: 1 }}>
+      <div style={{ display: "flex", gap: 4, flex: 1, justifyContent: "center" }}>
         {[0, 1, 2].map((s) => {
           const filled = basket.slots[s] !== undefined;
           return (
@@ -1298,10 +1394,13 @@ function BasketCell({ basket }) {
               style={{
                 flex: 1,
                 aspectRatio: "1 / 1",
-                maxWidth: 44,
+                maxWidth: 28,
                 border: "1.5px solid #2a1d10",
-                borderRadius: 6,
-                background: filled ? "#fbf3df" : "rgba(0,0,0,0.04)",
+                borderRadius: "50%",
+                background: "#fbf3df",
+                boxShadow: filled
+                  ? "inset 0 1px 0 rgba(255,255,255,0.42)"
+                  : "inset 2px 2px 0 rgba(42, 29, 16, 0.2)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1311,28 +1410,18 @@ function BasketCell({ basket }) {
                 <div
                   className="yp-pop"
                   style={{
-                    width: "70%",
-                    height: "70%",
+                    width: "72%",
+                    height: "72%",
                     borderRadius: "50%",
                     background: basket.color,
                     border: "1.4px solid #2a1d10",
+                    boxShadow: "inset 0 0 0 3px rgba(251, 243, 223, 0.5)",
                   }}
                 />
               )}
             </div>
           );
         })}
-      </div>
-      <div
-        style={{
-          fontFamily: FONT_MONO,
-          fontSize: 11,
-          letterSpacing: "0.18em",
-          opacity: 0.55,
-          flexShrink: 0,
-        }}
-      >
-        {basket.slots.length}/3
       </div>
     </div>
   );
@@ -1342,82 +1431,44 @@ function SpoolsRow({ spools }) {
   return (
     <section
       style={{
-        marginTop: 12,
+        marginTop: 8,
         display: "flex",
         alignItems: "center",
-        gap: 12,
-        border: "1.5px solid #2a1d10",
-        background: "#fbf3df",
-        padding: "10px 14px",
+        justifyContent: "center",
+        gap: 4,
+        padding: "4px 0",
       }}
     >
-      <div
-        style={{
-          fontFamily: FONT_MONO,
-          fontSize: 10,
-          letterSpacing: "0.22em",
-          textTransform: "uppercase",
-          opacity: 0.7,
-          flexShrink: 0,
-        }}
-      >
-        Spools
-      </div>
-      <div style={{ display: "flex", gap: 10, flex: 1 }}>
-        {spools.map((color, i) => (
-          <div
-            key={i}
-            style={{
-              flex: 1,
-              maxWidth: 56,
-              aspectRatio: "1 / 1",
-              border: "1.5px solid #2a1d10",
-              borderRadius: "50%",
-              background: color || "rgba(0,0,0,0.04)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              position: "relative",
-            }}
-          >
-            {color && (
-              <div
-                className="yp-pop"
-                style={{
-                  position: "absolute",
-                  inset: 4,
-                  borderRadius: "50%",
-                  background: color,
-                  border: "1.4px solid #2a1d10",
-                }}
-              />
-            )}
-            {!color && (
-              <span
-                style={{
-                  fontFamily: FONT_MONO,
-                  fontSize: 9,
-                  letterSpacing: "0.15em",
-                  opacity: 0.4,
-                }}
-              >
-                {i + 1}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-      <div
-        style={{
-          fontFamily: FONT_MONO,
-          fontSize: 11,
-          letterSpacing: "0.18em",
-          opacity: 0.55,
-          flexShrink: 0,
-        }}
-      >
-        {spools.filter((s) => s !== null).length}/{spools.length}
-      </div>
+      {spools.map((color, i) => (
+        <div
+          key={i}
+          style={{
+            width: 28,
+            height: 28,
+            border: "1.5px solid rgba(42, 29, 16, 0.7)",
+            borderRadius: "50%",
+            background: color || "rgba(42, 29, 16, 0.035)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+          }}
+        >
+          {color && (
+            <div
+              className="yp-pop"
+              style={{
+                position: "absolute",
+                inset: 3,
+                borderRadius: "50%",
+                background: color,
+                border: "1.25px solid #2a1d10",
+                boxShadow: "inset 0 0 0 3px rgba(251, 243, 223, 0.45)",
+              }}
+            />
+          )}
+        </div>
+      ))}
     </section>
   );
 }
