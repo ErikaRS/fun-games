@@ -335,12 +335,15 @@ function YarnSvgPatterns() {
 // children get revealed. Edges only render when both endpoints are visible.
 // ────────────────────────────────────────────────────────────────────────────
 
-function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
+function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds, playableIds, stuck }) {
   const PAD = 76;
   const ROOT_RADIUS = 36;
   const RADIAL_GAP = 88;
   const MIN_NODE_ARC = 72;
   const NODE_R = 24;
+  const HOLD_PREVIEW_MS = 240;
+  const holdRef = useRef(null);
+  const [previewNodeId, setPreviewNodeId] = useState(null);
 
   const layout = useMemo(
     () =>
@@ -362,19 +365,88 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
   const isVisible = (id) => showAll || visibleIds.has(id);
   const isCleared = (id) => clearedIds && clearedIds.has(id);
   const isTappable = (id) => tappableIds && tappableIds.has(id);
+  const isPlayable = (id) => playableIds && playableIds.has(id);
+  const previewChildIds = useMemo(() => {
+    if (showAll || previewNodeId === null) return new Set();
+    const node = forest.nodes[previewNodeId];
+    return new Set(node ? node.children : []);
+  }, [forest, previewNodeId, showAll]);
+  const isPreviewChild = (id) => previewChildIds.has(id) && !isVisible(id);
+  const isRendered = (id) => isVisible(id) || isPreviewChild(id);
+
+  const clearHold = useCallback(() => {
+    if (holdRef.current?.timer) clearTimeout(holdRef.current.timer);
+    holdRef.current = null;
+    setPreviewNodeId(null);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (holdRef.current?.timer) clearTimeout(holdRef.current.timer);
+    },
+    []
+  );
+
+  const onNodePointerDown = useCallback(
+    (event, nodeId, canTap) => {
+      if (!canTap || !onTap) return;
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const press = {
+        id: nodeId,
+        pointerId: event.pointerId,
+        previewed: false,
+        timer: null,
+      };
+      press.timer = setTimeout(() => {
+        press.previewed = true;
+        setPreviewNodeId(nodeId);
+      }, HOLD_PREVIEW_MS);
+      holdRef.current = press;
+    },
+    [onTap]
+  );
+
+  const onNodePointerUp = useCallback(
+    (event, nodeId) => {
+      const press = holdRef.current;
+      if (!press || press.id !== nodeId || press.pointerId !== event.pointerId) return;
+      event.stopPropagation();
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      if (press.timer) clearTimeout(press.timer);
+      holdRef.current = null;
+      setPreviewNodeId(null);
+      if (!press.previewed) onTap?.(nodeId);
+    },
+    [onTap]
+  );
+
+  const onNodePointerCancel = useCallback(
+    (event, nodeId) => {
+      const press = holdRef.current;
+      if (!press || press.id !== nodeId || press.pointerId !== event.pointerId) return;
+      event.stopPropagation();
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      clearHold();
+    },
+    [clearHold]
+  );
 
   const edges = [];
   for (const node of forest.nodes) {
     if (node.parentId === null) continue;
-    if (!isVisible(node.id) || !isVisible(node.parentId)) continue;
+    if (!isRendered(node.id) || !isRendered(node.parentId)) continue;
     const a = pos.get(node.parentId);
     const b = pos.get(node.id);
+    const preview = previewChildIds.has(node.id) && node.parentId === previewNodeId;
     edges.push({
       key: node.id,
       ax: a.x + offsetX,
       ay: a.y + offsetY,
       bx: b.x + offsetX,
       by: b.y + offsetY,
+      cleared: isCleared(node.id) || isCleared(node.parentId),
+      preview,
     });
   }
 
@@ -412,21 +484,29 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
 
       <rect x="0" y="0" width={width} height={height} fill="url(#grain)" />
 
-      <g fill="none" stroke="#7a5a3a" strokeWidth="1.8" strokeOpacity="0.6" strokeLinecap="round">
+      <g fill="none" stroke="#7a5a3a" strokeWidth="1.25" strokeLinecap="round">
         {edges.map((e) => (
-          <path key={e.key} d={edgePath(e)} />
+          <path
+            key={e.key}
+            d={edgePath(e)}
+            strokeDasharray={e.preview ? "4 6" : undefined}
+            strokeOpacity={e.preview ? 0.34 : e.cleared ? 0.08 : 0.22}
+          />
         ))}
       </g>
 
       <g>
         {forest.nodes.map((n) => {
-          if (!isVisible(n.id)) return null;
+          if (!isRendered(n.id)) return null;
           const p = pos.get(n.id);
           const cx = p.x + offsetX;
           const cy = p.y + offsetY;
           const isRoot = n.parentId === null;
           const cleared = isCleared(n.id);
           const tappable = isTappable(n.id);
+          const playable = isPlayable(n.id);
+          const previewChild = isPreviewChild(n.id);
+          const pressPreviewing = previewNodeId === n.id;
 
           return (
             <g
@@ -435,13 +515,15 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
               transform={`translate(${cx}, ${cy})`}
               style={{
                 cursor: tappable && onTap ? "pointer" : "default",
-                opacity: cleared ? 0.18 : 1,
+                opacity: previewChild ? 0.82 : cleared ? 0.18 : stuck && !playable ? 0.52 : 1,
                 transition: "opacity 280ms ease",
               }}
-              onClick={tappable && onTap ? () => onTap(n.id) : undefined}
+              onPointerDown={(event) => onNodePointerDown(event, n.id, tappable && !cleared)}
+              onPointerUp={(event) => onNodePointerUp(event, n.id)}
+              onPointerCancel={(event) => onNodePointerCancel(event, n.id)}
             >
               <title>{`node ${n.id}: ${yarnTitle(n.color)}`}</title>
-              {!cleared && (
+              {!cleared && !previewChild && (
                 <circle
                   r={NODE_R + 2}
                   fill="#3b2a1a"
@@ -450,7 +532,17 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
                   transform="translate(1, 2)"
                 />
               )}
-              {tappable && !cleared && (
+              {pressPreviewing && !cleared && (
+                <circle
+                  r={NODE_R + 12}
+                  fill="none"
+                  stroke="#2a1d10"
+                  strokeWidth="2"
+                  strokeDasharray="5 6"
+                  strokeOpacity="0.42"
+                />
+              )}
+              {playable && !cleared && !previewChild && (
                 <circle
                   className="yp-pulse"
                   r={NODE_R + 9}
@@ -460,11 +552,31 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
                   strokeOpacity="0.55"
                 />
               )}
+              {stuck && tappable && !cleared && !previewChild && (
+                <circle
+                  className="yp-stuck-ring"
+                  r={NODE_R + 8}
+                  fill="none"
+                  stroke="#2a1d10"
+                  strokeWidth="2"
+                  strokeOpacity="0.42"
+                />
+              )}
+              {previewChild && (
+                <circle
+                  r={NODE_R + 5}
+                  fill="#fbf3df"
+                  stroke="#2a1d10"
+                  strokeWidth="1.8"
+                  strokeDasharray="5 5"
+                  opacity="0.88"
+                />
+              )}
               <circle
                 r={NODE_R}
                 fill={n.color || "#dba66a"}
-                stroke="#3b2a1a"
-                strokeWidth="2"
+                stroke={previewChild ? "#2a1d10" : "#3b2a1a"}
+                strokeWidth={previewChild ? "1.6" : "2"}
               />
               <circle r={NODE_R - 2} fill={`url(#${yarnPatternId(n.color)})`} />
               {isRoot && (
@@ -644,6 +756,12 @@ function getTappableNodeIds(state) {
     if (!state.cleared.has(id)) ids.push(id);
   }
   return ids;
+}
+
+function getPlayableNodeIds(state, forest) {
+  return getTappableNodeIds(state).filter(
+    (id) => applyTapWithOptions(state, forest, id).ok
+  );
 }
 
 function makeStateForSimulation(forest, activationOrder, spoolCapacity) {
@@ -942,9 +1060,11 @@ export default function App() {
   const [game, setGame] = useState(() =>
     buildInitialGameState(forest, baskets, difficultyConfig.spools)
   );
+  const [history, setHistory] = useState([]);
 
   useEffect(() => {
     setGame(buildInitialGameState(forest, baskets, difficultyConfig.spools));
+    setHistory([]);
   }, [forest, baskets, difficultyConfig.spools]);
 
   const reroll = useCallback(() => {
@@ -958,6 +1078,7 @@ export default function App() {
 
   const restart = useCallback(() => {
     setGame(buildInitialGameState(forest, baskets, difficultyConfig.spools));
+    setHistory([]);
     setRecenterKey((key) => key + 1);
   }, [forest, baskets, difficultyConfig.spools]);
 
@@ -969,10 +1090,15 @@ export default function App() {
     return s;
   }, [game]);
 
+  const playableIds = useMemo(() => new Set(getPlayableNodeIds(game, forest)), [game, forest]);
+  const won = game.cleared.size === forest.nodes.length;
+  const stuck = !won && tappableIds.size > 0 && playableIds.size === 0;
+
   const onTap = useCallback(
     (nodeId) => {
       const result = applyTap(game, forest, nodeId);
       if (result.ok) {
+        setHistory((items) => [...items, game]);
         setGame(result.state);
       } else if (
         result.reason === "no matching basket and no spool space" ||
@@ -984,7 +1110,11 @@ export default function App() {
     [game, forest]
   );
 
-  const won = game.cleared.size === forest.nodes.length;
+  const undo = useCallback(() => {
+    if (history.length === 0) return;
+    setGame(history[history.length - 1]);
+    setHistory(history.slice(0, -1));
+  }, [history]);
 
   const stats = useMemo(() => {
     const rootCount = forest.rootIds.length;
@@ -1024,6 +1154,12 @@ export default function App() {
         button.ypbtn.ghost { background: transparent; color: #2a1d10; }
         button.ypbtn:hover { transform: translateY(-1px); }
         button.ypbtn.ghost:hover { background: #2a1d10; color: #f7ecd4; }
+        button.ypbtn:disabled,
+        button.ypbtn:disabled:hover {
+          transform: none;
+          background: rgba(251, 243, 223, 0.74);
+          color: #2a1d10;
+        }
         button.ypseg {
           font-family: ${FONT_MONO};
           font-size: 9px;
@@ -1073,6 +1209,11 @@ export default function App() {
           50% { r: 23; opacity: 0.15; }
         }
         .yp-pulse { animation: yp-pulse 1800ms ease-in-out infinite; }
+        @keyframes yp-stuck-ring {
+          0%, 100% { r: 29; opacity: 0.38; }
+          50% { r: 33; opacity: 0.16; }
+        }
+        .yp-stuck-ring { animation: yp-stuck-ring 1300ms ease-in-out infinite; }
         @keyframes yp-shake {
           0%, 100% { transform: translateX(0); }
           20% { transform: translateX(-6px); }
@@ -1190,22 +1331,75 @@ export default function App() {
             style={{
               position: "absolute",
               top: 10,
-              right: 14,
-              fontFamily: FONT_MONO,
-              fontSize: 10,
-              letterSpacing: "0.22em",
-              textTransform: "uppercase",
-              opacity: 0.5,
+              left: 14,
+              zIndex: 2,
             }}
           >
-            {won ? "fin." : `${game.cleared.size} / ${forest.nodes.length}`}
+            <button
+              className="ypbtn ghost"
+              onClick={undo}
+              disabled={history.length === 0}
+              title="Undo last move"
+              style={{
+                padding: "8px 12px",
+                background: history.length === 0 ? "rgba(251, 243, 223, 0.74)" : "#fbf3df",
+                opacity: history.length === 0 ? 0.45 : 1,
+                cursor: history.length === 0 ? "default" : "pointer",
+                boxShadow: "2px 2px 0 rgba(42, 29, 16, 0.18)",
+              }}
+            >
+              ↶ Undo
+            </button>
           </div>
+          {stuck && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                top: 42,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 2,
+                border: "2px solid #2a1d10",
+                background: "#f7ecd4",
+                boxShadow: "4px 4px 0 rgba(42, 29, 16, 0.32)",
+                padding: "11px 14px",
+                maxWidth: "min(420px, calc(100% - 36px))",
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: FONT_MONO,
+                  fontSize: 10,
+                  letterSpacing: "0.2em",
+                  textTransform: "uppercase",
+                  marginBottom: 3,
+                }}
+              >
+                Stuck
+              </div>
+              <div
+                style={{
+                  fontFamily: FONT_DISPLAY,
+                  fontSize: 21,
+                  lineHeight: 1.1,
+                  fontStyle: "italic",
+                }}
+              >
+                no open basket or spool can take these threads.
+              </div>
+            </div>
+          )}
           <ForestViewport focusKey={`${difficulty}-${seed}-${recenterKey}`}>
             <ForestSVG
               forest={forest}
               visibleIds={game.visible}
               clearedIds={game.cleared}
               tappableIds={tappableIds}
+              playableIds={playableIds}
+              stuck={stuck}
               onTap={onTap}
             />
           </ForestViewport>
