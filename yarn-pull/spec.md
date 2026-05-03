@@ -95,6 +95,21 @@ The basket creation order from Step 2 goes leaves-first, roots-last. The last ba
 
 This reversal alone is sufficient in combination with spools — the spools absorb timing mismatches between when a node is revealed and when its corresponding basket is active.
 
+### Step 4 — Add certified spool pressure
+The reversed activation order is treated as a safe baseline. To keep puzzles from being trivially zero-spool, generation searches for a small basket delay that introduces controlled timing mismatch.
+
+**Algorithm:**
+1. Record the 3 node IDs assigned to each basket during coloring
+2. Build the safe reversed activation order
+3. Solve the safe order with zero spools to produce a legal tap trace
+4. Pick candidate non-root tap events from that trace
+5. Delay the tapped node's basket by a small lag in the activation order
+6. Replay the same tap trace with normal spools
+7. Accept the delayed order only if replay succeeds and lands in the target pressure band
+8. Run a zero-spool solver against the delayed order and reject it if any zero-spool solution still exists
+
+The accepted puzzle therefore has a witness solution and a measured pressure profile. If no order can be certified within the generation budget, the generator falls back to the safe reversed order.
+
 ---
 
 ## Parameters
@@ -105,6 +120,8 @@ This reversal alone is sufficient in combination with spools — the spools abso
 | Active baskets | Always 3 |
 | Basket slots | 3 nodes each |
 | Holding spools | 5 |
+| Target spool placements | 1–3 for the certified solve |
+| Target peak spool occupancy | At most 3 for the certified solve |
 | Root count | 2–4 |
 | Child count probabilities | 0: 1%, 1: 49%, 2: 25%, 3: 15%, 4: 10% |
 | Color palette | Any size; colors assigned freely with no coverage requirements |

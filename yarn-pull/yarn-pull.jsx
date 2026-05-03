@@ -103,6 +103,7 @@ function colorForestAndMakeBaskets(forest, rng) {
 
   while (uncoloredCount > 0) {
     const color = PALETTE[Math.floor(rng() * PALETTE.length)];
+    const nodeIds = [];
     for (let k = 0; k < 3; k++) {
       if (ready.length === 0) {
         throw new Error(
@@ -114,6 +115,8 @@ function colorForestAndMakeBaskets(forest, rng) {
       ready[idx] = ready[ready.length - 1];
       ready.pop();
       node.color = color;
+      node.basketId = baskets.length;
+      nodeIds.push(node.id);
       uncoloredCount--;
       if (node.parentId !== null) {
         const parent = nodes[node.parentId];
@@ -122,7 +125,7 @@ function colorForestAndMakeBaskets(forest, rng) {
         if (newCount === parent.children.length) ready.push(parent);
       }
     }
-    baskets.push({ color });
+    baskets.push({ id: baskets.length, color, nodeIds });
   }
   return baskets;
 }
@@ -318,20 +321,29 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds }) {
 // ────────────────────────────────────────────────────────────────────────────
 
 const NUM_SPOOLS = 5;
+const PRESSURE_TARGET = {
+  minPlacements: 1,
+  maxPlacements: 3,
+  maxPeak: 3,
+};
 
-function buildInitialGameState(forest, baskets) {
-  const queue = baskets.slice().reverse();
+function buildInitialGameStateFromActivationOrder(activationOrder, spoolCapacity = NUM_SPOOLS) {
+  const queue = activationOrder.map((b) => ({ ...b }));
   const active = [];
   for (let i = 0; i < 3 && queue.length > 0; i++) {
-    active.push({ color: queue.shift().color, slots: [] });
+    const basket = queue.shift();
+    active.push({ ...basket, slots: [] });
   }
   while (active.length < 3) active.push(null);
 
+  return { queue, active, spools: new Array(spoolCapacity).fill(null) };
+}
+
+function buildInitialGameState(forest, baskets) {
+  const routed = buildInitialGameStateFromActivationOrder(baskets.slice().reverse());
   const visible = new Set(forest.rootIds);
   const cleared = new Set();
-  // spools: array of length NUM_SPOOLS; each entry is a color string or null
-  const spools = new Array(NUM_SPOOLS).fill(null);
-  return { queue, active, visible, cleared, spools };
+  return { ...routed, visible, cleared };
 }
 
 // Internal helper: place a single node-color into the first matching active
@@ -351,7 +363,7 @@ function tryPlaceColorInBasket(active, queue, color) {
   let newQueue = queue;
   if (newActive[slotIdx].slots.length === 3) {
     if (queue.length > 0) {
-      newActive[slotIdx] = { color: queue[0].color, slots: [] };
+      newActive[slotIdx] = { ...queue[0], slots: [] };
       newQueue = queue.slice(1);
     } else {
       newActive[slotIdx] = null;
@@ -386,6 +398,11 @@ function autoFlush(active, queue, spools) {
 }
 
 function applyTap(state, forest, nodeId) {
+  return applyTapWithOptions(state, forest, nodeId, { spoolCapacity: state.spools.length });
+}
+
+function applyTapWithOptions(state, forest, nodeId, opts = {}) {
+  const spoolCapacity = opts.spoolCapacity ?? state.spools.length;
   const node = forest.nodes[nodeId];
   if (state.cleared.has(nodeId)) return { state, ok: false, reason: "already cleared" };
   if (!state.visible.has(nodeId)) return { state, ok: false, reason: "not visible" };
@@ -394,6 +411,7 @@ function applyTap(state, forest, nodeId) {
   let newActive = state.active;
   let newQueue = state.queue;
   let newSpools = state.spools;
+  let wentToSpool = false;
 
   const slotIdx = newActive.findIndex(
     (b) => b && b.color === node.color && b.slots.length < 3
@@ -406,7 +424,7 @@ function applyTap(state, forest, nodeId) {
     );
     if (newActive[slotIdx].slots.length === 3) {
       if (newQueue.length > 0) {
-        newActive[slotIdx] = { color: newQueue[0].color, slots: [] };
+        newActive[slotIdx] = { ...newQueue[0], slots: [] };
         newQueue = newQueue.slice(1);
       } else {
         newActive[slotIdx] = null;
@@ -414,12 +432,16 @@ function applyTap(state, forest, nodeId) {
     }
   } else {
     // Try spool
+    if (spoolCapacity === 0) {
+      return { state, ok: false, reason: "no matching basket" };
+    }
     const spoolIdx = newSpools.findIndex((s) => s === null);
     if (spoolIdx === -1) {
       return { state, ok: false, reason: "no matching basket and no spool space" };
     }
     newSpools = newSpools.slice();
     newSpools[spoolIdx] = node.color;
+    wentToSpool = true;
   }
 
   // Reveal children + mark cleared
@@ -440,7 +462,231 @@ function applyTap(state, forest, nodeId) {
       spools: flushed.spools,
     },
     ok: true,
+    wentToSpool,
   };
+}
+
+function getTappableNodeIds(state) {
+  const ids = [];
+  for (const id of state.visible) {
+    if (!state.cleared.has(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function makeStateForSimulation(forest, activationOrder, spoolCapacity) {
+  const routed = buildInitialGameStateFromActivationOrder(activationOrder, spoolCapacity);
+  return {
+    ...routed,
+    visible: new Set(forest.rootIds),
+    cleared: new Set(),
+  };
+}
+
+function makeSafePreferenceOrder(baskets) {
+  const order = [];
+  for (const basket of baskets.slice().reverse()) {
+    order.push(...basket.nodeIds);
+  }
+  return order;
+}
+
+function solveWithPreferredOrder(forest, activationOrder, preferredNodeOrder, spoolCapacity) {
+  const rank = new Map(preferredNodeOrder.map((id, i) => [id, i]));
+  let state = makeStateForSimulation(forest, activationOrder, spoolCapacity);
+  const trace = [];
+  let spoolPlacements = 0;
+  let peakSpoolOccupancy = 0;
+
+  while (state.cleared.size < forest.nodes.length) {
+    const tappable = getTappableNodeIds(state).sort(
+      (a, b) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity)
+    );
+    let chosen = null;
+    for (const id of tappable) {
+      const result = applyTapWithOptions(state, forest, id, { spoolCapacity });
+      if (result.ok) {
+        chosen = { id, result };
+        break;
+      }
+    }
+    if (!chosen) {
+      return { ok: false, trace, spoolPlacements, peakSpoolOccupancy };
+    }
+
+    state = chosen.result.state;
+    if (chosen.result.wentToSpool) spoolPlacements++;
+    peakSpoolOccupancy = Math.max(
+      peakSpoolOccupancy,
+      state.spools.filter((s) => s !== null).length
+    );
+    trace.push(chosen.id);
+  }
+
+  return { ok: true, trace, spoolPlacements, peakSpoolOccupancy };
+}
+
+function replayTrace(forest, activationOrder, trace, spoolCapacity) {
+  let state = makeStateForSimulation(forest, activationOrder, spoolCapacity);
+  let spoolPlacements = 0;
+  let peakSpoolOccupancy = 0;
+
+  for (const nodeId of trace) {
+    const result = applyTapWithOptions(state, forest, nodeId, { spoolCapacity });
+    if (!result.ok) {
+      return { ok: false, spoolPlacements, peakSpoolOccupancy, reason: result.reason };
+    }
+    state = result.state;
+    if (result.wentToSpool) spoolPlacements++;
+    peakSpoolOccupancy = Math.max(
+      peakSpoolOccupancy,
+      state.spools.filter((s) => s !== null).length
+    );
+  }
+
+  return {
+    ok: state.cleared.size === forest.nodes.length,
+    spoolPlacements,
+    peakSpoolOccupancy,
+  };
+}
+
+function pressureIsInTarget(metrics) {
+  return (
+    metrics.ok &&
+    metrics.spoolPlacements >= PRESSURE_TARGET.minPlacements &&
+    metrics.spoolPlacements <= PRESSURE_TARGET.maxPlacements &&
+    metrics.peakSpoolOccupancy <= PRESSURE_TARGET.maxPeak
+  );
+}
+
+function moveBasket(order, fromIdx, toIdx) {
+  const next = order.slice();
+  const [basket] = next.splice(fromIdx, 1);
+  next.splice(toIdx, 0, basket);
+  return next;
+}
+
+function encodeZeroSpoolState(state) {
+  const visible = [...state.visible].sort((a, b) => a - b).join(",");
+  const cleared = [...state.cleared].sort((a, b) => a - b).join(",");
+  const active = state.active
+    .map((b) => (b ? `${b.id}:${b.slots.length}` : "_"))
+    .join(",");
+  const queue = state.queue.map((b) => b.id).join(",");
+  return `${visible}|${cleared}|${active}|${queue}`;
+}
+
+function hasZeroSpoolSolution(forest, activationOrder, maxStates = 4000) {
+  const seen = new Set();
+  let searched = 0;
+
+  const dfs = (state) => {
+    if (state.cleared.size === forest.nodes.length) return true;
+    if (searched++ > maxStates) return null;
+
+    const key = encodeZeroSpoolState(state);
+    if (seen.has(key)) return false;
+    seen.add(key);
+
+    const activeColors = new Set(state.active.filter(Boolean).map((b) => b.color));
+    const tappable = getTappableNodeIds(state)
+      .filter((id) => activeColors.has(forest.nodes[id].color))
+      .sort((a, b) => forest.nodes[b].depth - forest.nodes[a].depth);
+
+    for (const nodeId of tappable) {
+      const result = applyTapWithOptions(state, forest, nodeId, { spoolCapacity: 0 });
+      if (!result.ok) continue;
+      const child = dfs(result.state);
+      if (child === true) return true;
+      if (child === null) return null;
+    }
+
+    return false;
+  };
+
+  return dfs(makeStateForSimulation(forest, activationOrder, 0));
+}
+
+function shuffleCopy(items, rng) {
+  const copy = items.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function addSpoolPressure(forest, baskets, rng) {
+  const safeActivationOrder = baskets.slice().reverse();
+  const safePreference = makeSafePreferenceOrder(baskets);
+  const safeSolve = solveWithPreferredOrder(forest, safeActivationOrder, safePreference, 0);
+  if (!safeSolve.ok) {
+    return { baskets, metrics: { pressured: false, reason: "safe-solve-failed" } };
+  }
+
+  const candidateEvents = shuffleCopy(
+    safeSolve.trace.filter((nodeId) => forest.nodes[nodeId].parentId !== null),
+    rng
+  );
+  let checkedCandidates = 0;
+  const candidateBudget = forest.nodes.length > 90 ? 18 : forest.nodes.length > 60 ? 36 : 72;
+  const zeroSpoolStateBudget =
+    forest.nodes.length > 90 ? 300 : forest.nodes.length > 60 ? 1200 : 4000;
+
+  for (const nodeId of candidateEvents) {
+    const basketId = forest.nodes[nodeId].basketId;
+    const fromIdx = safeActivationOrder.findIndex((b) => b.id === basketId);
+    if (fromIdx === -1) continue;
+
+    for (let lag = 1; lag <= 8; lag++) {
+      checkedCandidates++;
+      if (checkedCandidates > candidateBudget) {
+        return {
+          baskets,
+          metrics: { pressured: false, reason: "pressure-search-budget-exhausted" },
+        };
+      }
+      const toIdx = Math.min(safeActivationOrder.length - 1, fromIdx + lag);
+      if (toIdx === fromIdx) continue;
+
+      const candidateOrder = moveBasket(safeActivationOrder, fromIdx, toIdx);
+      const replay = replayTrace(forest, candidateOrder, safeSolve.trace, NUM_SPOOLS);
+      if (!pressureIsInTarget(replay)) continue;
+
+      const zeroSpool = hasZeroSpoolSolution(forest, candidateOrder, zeroSpoolStateBudget);
+      if (zeroSpool !== false) continue;
+
+      return {
+        baskets: candidateOrder.slice().reverse(),
+        metrics: {
+          pressured: true,
+          spoolPlacements: replay.spoolPlacements,
+          peakSpoolOccupancy: replay.peakSpoolOccupancy,
+          zeroSpoolRejected: true,
+        },
+      };
+    }
+  }
+
+  return { baskets, metrics: { pressured: false, reason: "no-certified-pressure-order" } };
+}
+
+function generatePressuredPuzzle({ numBaskets, seed }) {
+  let fallback = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const attemptSeed = (seed + attempt * 7919) >>> 0;
+    const forest = generateForest({ numBaskets, seed: attemptSeed });
+    const colorRng = makeRng(attemptSeed ^ 0xb45c0107);
+    const baskets = colorForestAndMakeBaskets(forest, colorRng);
+    const pressureRng = makeRng(attemptSeed ^ 0x91e10da5);
+    const pressured = addSpoolPressure(forest, baskets, pressureRng);
+    if (!fallback) fallback = { forest, baskets, pressure: pressured.metrics };
+    if (pressured.metrics.pressured) {
+      return { forest, baskets: pressured.baskets, pressure: pressured.metrics };
+    }
+  }
+  return fallback;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -457,12 +703,10 @@ export default function App() {
   const [debugOpen, setDebugOpen] = useState(false);
   const [shake, setShake] = useState(0);
 
-  const { forest, baskets } = useMemo(() => {
-    const f = generateForest({ numBaskets, seed });
-    const colorRng = makeRng(seed ^ 0xb45c0107);
-    const b = colorForestAndMakeBaskets(f, colorRng);
-    return { forest: f, baskets: b };
-  }, [numBaskets, seed]);
+  const { forest, baskets, pressure } = useMemo(
+    () => generatePressuredPuzzle({ numBaskets, seed }),
+    [numBaskets, seed]
+  );
 
   const [game, setGame] = useState(() => buildInitialGameState(forest, baskets));
 
@@ -793,7 +1037,12 @@ export default function App() {
                   ["Nodes", `${forest.actual} / ${forest.target}`],
                   ["Roots", stats.rootCount],
                   ["Leaves", stats.leafCount],
-                  ["Max depth", stats.maxDepth],
+                  [
+                    "Pressure",
+                    pressure.pressured
+                      ? `${pressure.spoolPlacements} / ${pressure.peakSpoolOccupancy}`
+                      : "safe",
+                  ],
                 ].map(([label, value], i) => (
                   <div
                     key={label}
@@ -837,6 +1086,7 @@ export default function App() {
                   }}
                 >
                   leaves first → roots last · activation reverses this
+                  {pressure.pressured ? " · pressure order certified" : " · pressure fallback"}
                 </div>
                 <div
                   style={{
