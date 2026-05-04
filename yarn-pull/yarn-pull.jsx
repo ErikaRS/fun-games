@@ -335,11 +335,21 @@ function YarnSvgPatterns() {
 // children get revealed. Edges only render when both endpoints are visible.
 // ────────────────────────────────────────────────────────────────────────────
 
-function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds, playableIds, stuck }) {
+function ForestSVG({
+  forest,
+  visibleIds,
+  clearedIds,
+  onTap,
+  tappableIds,
+  playableIds,
+  stuck,
+  pullEvent,
+  clearedOrder,
+}) {
   const PAD = 76;
-  const ROOT_RADIUS = 36;
-  const RADIAL_GAP = 88;
-  const MIN_NODE_ARC = 72;
+  const ROOT_RADIUS = 26;
+  const RADIAL_GAP = 68;
+  const MIN_NODE_ARC = 60;
   const NODE_R = 24;
   const HOLD_PREVIEW_MS = 240;
   const holdRef = useRef(null);
@@ -366,6 +376,10 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds, playabl
   const isCleared = (id) => clearedIds && clearedIds.has(id);
   const isTappable = (id) => tappableIds && tappableIds.has(id);
   const isPlayable = (id) => playableIds && playableIds.has(id);
+  const pileOrder = useMemo(() => {
+    const ids = clearedOrder || [];
+    return new Map(ids.map((id, i) => [id, i]));
+  }, [clearedOrder]);
   const previewChildIds = useMemo(() => {
     if (showAll || previewNodeId === null) return new Set();
     const node = forest.nodes[previewNodeId];
@@ -432,32 +446,397 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds, playabl
     [clearHold]
   );
 
+  const edgePathBetween = (ax, ay, bx, by) => {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const c1x = ax + dx * 0.55;
+    const c1y = ay + dy * 0.15;
+    const c2x = bx - dx * 0.15;
+    const c2y = by - dy * 0.55;
+    return `M ${ax} ${ay} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${bx} ${by}`;
+  };
+
+  const edgePath = (e) => edgePathBetween(e.ax, e.ay, e.bx, e.by);
+
+  const nodePoint = (nodeId) => {
+    const p = pos.get(nodeId);
+    if (!p) return null;
+
+    const node = forest.nodes[nodeId];
+    if (!showAll && node?.parentId === null) {
+      const rootIndex = forest.rootIds.indexOf(nodeId);
+      const count = Math.max(forest.rootIds.length, 1);
+      const organicAngles = [-Math.PI / 2 - 0.28, -Math.PI / 2 + 0.34, -Math.PI / 2 + 1.02, -Math.PI / 2 - 0.96];
+      const angle = organicAngles[rootIndex] ?? -Math.PI / 2 + (Math.PI * 2 * rootIndex) / count;
+      const radius = 24 + (rootIndex % 2) * 8 + Math.floor(rootIndex / 2) * 4;
+      return {
+        x: offsetX + Math.cos(angle) * radius,
+        y: offsetY + Math.sin(angle) * radius * 0.76,
+      };
+    }
+
+    return { x: p.x + offsetX, y: p.y + offsetY };
+  };
+
+  const pileAvoidRadius = showAll
+    ? 0
+    : Math.min(148, 66 + Math.sqrt(Math.max(0, pileOrder.size)) * 9);
+
+  const baseActiveNodePoint = (nodeId) => {
+    const p = nodePoint(nodeId);
+    if (!p || showAll || pileAvoidRadius <= 0) return p;
+
+    const dx = p.x - offsetX;
+    const dy = p.y - offsetY;
+    const distance = Math.hypot(dx, dy);
+    if (distance >= pileAvoidRadius) return p;
+
+    const node = forest.nodes[nodeId];
+    const angle =
+      distance > 0.1
+        ? Math.atan2(dy, dx)
+        : -Math.PI / 2 + ((node?.id || 0) * 2.399963229728653) % (Math.PI * 2);
+    const ringNudge = (node?.depth || 0) * 4 + ((node?.id || 0) % 5) * 1.8;
+    const radius = pileAvoidRadius + ringNudge;
+
+    return {
+      x: offsetX + Math.cos(angle) * radius,
+      y: offsetY + Math.sin(angle) * radius,
+    };
+  };
+
+  const pilePoint = (nodeId) => {
+    const index = pileOrder.get(nodeId);
+    if (index === undefined) return null;
+    if (index === 0) {
+      return {
+        x: offsetX,
+        y: offsetY,
+      };
+    }
+
+    const ring = Math.floor((Math.sqrt(index) + 1) / 2);
+    const angle = index * 2.399963229728653;
+    const radius = 8 + ring * 10 + (index % 3) * 1.7;
+    return {
+      x: offsetX + Math.cos(angle) * radius,
+      y: offsetY + Math.sin(angle) * radius * 0.82,
+    };
+  };
+
+  const activePointMap = new Map();
+  if (!showAll) {
+    const activeNodeIds = forest.nodes
+      .filter((node) => isRendered(node.id) && !isCleared(node.id))
+      .map((node) => node.id);
+    const basePoints = new Map(
+      activeNodeIds
+        .map((id) => [id, baseActiveNodePoint(id)])
+        .filter(([, point]) => point)
+    );
+    const clearance = NODE_R * 2 + 7;
+    const centerClearance = pileAvoidRadius + NODE_R + 7;
+
+    for (const nodeId of activeNodeIds) {
+      const node = forest.nodes[nodeId];
+      const base = basePoints.get(nodeId);
+      if (!base) continue;
+
+      let point = base;
+      const parentCleared = node.parentId !== null && isCleared(node.parentId);
+
+      if (parentCleared) {
+        for (const amount of [0.5, 0.4, 0.3, 0.2, 0.1]) {
+          const candidate = {
+            x: base.x + (offsetX - base.x) * amount,
+            y: base.y + (offsetY - base.y) * amount,
+          };
+          const centerDistance = Math.hypot(candidate.x - offsetX, candidate.y - offsetY);
+          if (centerDistance < centerClearance) continue;
+
+          let overlaps = false;
+          for (const otherId of activeNodeIds) {
+            if (otherId === nodeId) continue;
+            const other = activePointMap.get(otherId) || basePoints.get(otherId);
+            if (!other) continue;
+            if (Math.hypot(candidate.x - other.x, candidate.y - other.y) < clearance) {
+              overlaps = true;
+              break;
+            }
+          }
+          if (!overlaps) {
+            point = candidate;
+            break;
+          }
+        }
+      }
+
+      activePointMap.set(nodeId, point);
+    }
+  }
+
+  const activeNodePoint = (nodeId) => {
+    if (!showAll && activePointMap.has(nodeId)) return activePointMap.get(nodeId);
+    return baseActiveNodePoint(nodeId);
+  };
+
+  const displayedNodePoint = (nodeId) => {
+    if (!showAll && isCleared(nodeId)) return pilePoint(nodeId) || nodePoint(nodeId);
+    return activeNodePoint(nodeId);
+  };
+
+  const pullTargetPoint = (node) => {
+    const pile = pilePoint(node.id);
+    if (pile) return pile;
+    return {
+      x: offsetX,
+      y: offsetY,
+    };
+  };
+
+  const pullSourcePoint = pullEvent ? activeNodePoint(pullEvent.nodeId) : null;
+  const pullNode = pullEvent ? forest.nodes[pullEvent.nodeId] : null;
+  const pullTarget = pullNode ? pullTargetPoint(pullNode) : null;
+
+  const pullForNode = (node, cx, cy) => {
+    if (!pullEvent || !pullSourcePoint || !pullTarget || node.id === pullEvent.nodeId) {
+      return null;
+    }
+
+    let toX = pullTarget.x;
+    let toY = pullTarget.y;
+    let strength = 0;
+
+    if (node.parentId === pullEvent.nodeId) {
+      toX = pullSourcePoint.x;
+      toY = pullSourcePoint.y;
+      strength = 0.18;
+    } else if (pullNode && node.parentId === pullNode.parentId) {
+      strength = 0.08;
+    } else {
+      const distance = Math.hypot(cx - pullSourcePoint.x, cy - pullSourcePoint.y);
+      strength = Math.max(0, 0.09 - distance / 2600);
+    }
+
+    if (strength <= 0.01) return null;
+
+    const dx = toX - cx;
+    const dy = toY - cy;
+    const len = Math.max(1, Math.hypot(dx, dy));
+    const amount = Math.min(node.parentId === pullEvent.nodeId ? 18 : 10, len * strength);
+    const tugX = (dx / len) * amount;
+    const tugY = (dy / len) * amount;
+
+    return {
+      x: tugX,
+      y: tugY,
+      backX: tugX * -0.16,
+      backY: tugY * -0.16,
+    };
+  };
+
   const edges = [];
   for (const node of forest.nodes) {
     if (node.parentId === null) continue;
     if (!isRendered(node.id) || !isRendered(node.parentId)) continue;
-    const a = pos.get(node.parentId);
-    const b = pos.get(node.id);
+    const a = displayedNodePoint(node.parentId);
+    const b = displayedNodePoint(node.id);
+    if (!a || !b) continue;
     const preview = previewChildIds.has(node.id) && node.parentId === previewNodeId;
     edges.push({
       key: node.id,
-      ax: a.x + offsetX,
-      ay: a.y + offsetY,
-      bx: b.x + offsetX,
-      by: b.y + offsetY,
+      ax: a.x,
+      ay: a.y,
+      bx: b.x,
+      by: b.y,
+      parentColor: forest.nodes[node.parentId].color,
+      childColor: node.color,
       cleared: isCleared(node.id) || isCleared(node.parentId),
       preview,
     });
   }
 
-  const edgePath = (e) => {
-    const dx = e.bx - e.ax;
-    const dy = e.by - e.ay;
-    const c1x = e.ax + dx * 0.55;
-    const c1y = e.ay + dy * 0.15;
-    const c2x = e.bx - dx * 0.15;
-    const c2y = e.by - dy * 0.55;
-    return `M ${e.ax} ${e.ay} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${e.bx} ${e.by}`;
+  const rootYarnEdges = [];
+  if (!showAll) {
+    const renderedRoots = forest.rootIds
+      .filter((id) => isRendered(id))
+      .map((id) => ({ id, point: displayedNodePoint(id), node: forest.nodes[id] }))
+      .filter((root) => root.point);
+
+    const edgeCount = renderedRoots.length === 2 ? 1 : renderedRoots.length;
+    for (let i = 0; i < edgeCount; i++) {
+      const a = renderedRoots[i];
+      const b = renderedRoots[(i + 1) % renderedRoots.length];
+      if (!a || !b || a.id === b.id) continue;
+      rootYarnEdges.push({
+        key: `root-${a.id}-${b.id}`,
+        ax: a.point.x,
+        ay: a.point.y,
+        bx: b.point.x,
+        by: b.point.y,
+        parentColor: a.node.color,
+        childColor: b.node.color,
+        cleared: isCleared(a.id) || isCleared(b.id),
+        preview: false,
+        fakeRoot: true,
+      });
+    }
+  }
+
+  const renderNode = (n) => {
+    if (!isRendered(n.id)) return null;
+    const originalPoint = activeNodePoint(n.id);
+    const displayPoint = displayedNodePoint(n.id);
+    if (!originalPoint || !displayPoint) return null;
+    const cx = displayPoint.x;
+    const cy = displayPoint.y;
+    const cleared = isCleared(n.id);
+    const piled = !showAll && cleared;
+    const enteringPile = piled && pullEvent?.nodeId === n.id;
+    const tappable = isTappable(n.id);
+    const playable = isPlayable(n.id);
+    const previewChild = isPreviewChild(n.id);
+    const pressPreviewing = previewNodeId === n.id;
+    const pull = pullForNode(n, cx, cy);
+    const pileEntryPath =
+      enteringPile && n.parentId !== null
+        ? edgePathBetween(
+            originalPoint.x - cx,
+            originalPoint.y - cy,
+            (displayedNodePoint(n.parentId)?.x || originalPoint.x) - cx,
+            (displayedNodePoint(n.parentId)?.y || originalPoint.y) - cy
+          ) + ` S ${-(originalPoint.x - cx) * 0.08} ${-(originalPoint.y - cy) * 0.08}, 0 0`
+        : enteringPile
+          ? edgePathBetween(originalPoint.x - cx, originalPoint.y - cy, 0, 0)
+          : null;
+    const artClassNames = [
+      pull ? "yp-node-tug" : "",
+      enteringPile ? "yp-pile-enter" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return (
+      <g
+        key={n.id}
+        data-yarn-node="true"
+        transform={`translate(${cx}, ${cy})`}
+        style={{
+          cursor: tappable && onTap ? "pointer" : "default",
+          opacity: previewChild ? 0.82 : stuck && !playable ? 0.52 : 1,
+          transition: "opacity 280ms ease",
+          pointerEvents: piled ? "none" : "auto",
+        }}
+        onPointerDown={(event) => onNodePointerDown(event, n.id, tappable && !cleared)}
+        onPointerUp={(event) => onNodePointerUp(event, n.id)}
+        onPointerCancel={(event) => onNodePointerCancel(event, n.id)}
+      >
+        <g
+          key={`node-art-${n.id}-${pull || enteringPile ? pullEvent.key : "still"}`}
+          className={artClassNames || undefined}
+          style={
+            pull || enteringPile
+              ? {
+                  ...(pull
+                    ? {
+                        "--yp-tug-x": `${pull.x}px`,
+                        "--yp-tug-y": `${pull.y}px`,
+                        "--yp-tug-back-x": `${pull.backX}px`,
+                        "--yp-tug-back-y": `${pull.backY}px`,
+                      }
+                    : {}),
+                }
+              : undefined
+          }
+        >
+          {pileEntryPath && (
+            <animateMotion
+              dur="560ms"
+              path={pileEntryPath}
+              fill="freeze"
+              calcMode="spline"
+              keyPoints="0;0.86;1"
+              keyTimes="0;0.78;1"
+              keySplines="0.22 0.82 0.24 1;0.22 1 0.36 1"
+            />
+          )}
+          {pileEntryPath && (
+            <animateTransform
+              attributeName="transform"
+              type="scale"
+              additive="sum"
+              dur="560ms"
+              values="1;0.9;1.045;1"
+              keyTimes="0;0.66;0.84;1"
+              fill="freeze"
+            />
+          )}
+          <title>{`node ${n.id}: ${yarnTitle(n.color)}`}</title>
+          {!cleared && !previewChild && (
+            <circle
+              r={NODE_R + 2}
+              fill="#3b2a1a"
+              opacity="0.2"
+              filter="url(#paper-shadow)"
+              transform="translate(1, 2)"
+            />
+          )}
+          {pressPreviewing && !cleared && (
+            <circle
+              r={NODE_R + 12}
+              fill="none"
+              stroke="#2a1d10"
+              strokeWidth="2"
+              strokeDasharray="5 6"
+              strokeOpacity="0.42"
+            />
+          )}
+          {playable && !cleared && !previewChild && (
+            <circle
+              className="yp-pulse"
+              r={NODE_R + 9}
+              fill="none"
+              stroke={n.color}
+              strokeWidth="2.4"
+              strokeOpacity="0.55"
+            />
+          )}
+          {stuck && tappable && !cleared && !previewChild && (
+            <circle
+              className="yp-stuck-ring"
+              r={NODE_R + 8}
+              fill="none"
+              stroke="#2a1d10"
+              strokeWidth="2"
+              strokeOpacity="0.42"
+            />
+          )}
+          {previewChild && (
+            <circle
+              r={NODE_R + 5}
+              fill="#fbf3df"
+              stroke="#2a1d10"
+              strokeWidth="1.8"
+              strokeDasharray="5 5"
+              opacity="0.88"
+            />
+          )}
+          <circle
+            r={NODE_R}
+            fill={n.color || "#dba66a"}
+            stroke={piled ? "#fbf3df" : previewChild ? "#2a1d10" : "#3b2a1a"}
+            strokeWidth={piled ? "2.8" : previewChild ? "1.6" : "2"}
+          />
+          <circle
+            r={NODE_R - 2}
+            fill={`url(#${yarnPatternId(n.color)})`}
+            opacity={piled ? "0.42" : "1"}
+          />
+          {piled && <circle r={NODE_R - 3} fill="#fbf3df" opacity="0.32" />}
+          {tappable && <circle r={NODE_R + 18} fill="transparent" />}
+        </g>
+      </g>
+    );
   };
 
   return (
@@ -484,109 +863,61 @@ function ForestSVG({ forest, visibleIds, clearedIds, onTap, tappableIds, playabl
 
       <rect x="0" y="0" width={width} height={height} fill="url(#grain)" />
 
-      <g fill="none" stroke="#7a5a3a" strokeWidth="1.25" strokeLinecap="round">
-        {edges.map((e) => (
-          <path
-            key={e.key}
-            d={edgePath(e)}
-            strokeDasharray={e.preview ? "4 6" : undefined}
-            strokeOpacity={e.preview ? 0.34 : e.cleared ? 0.08 : 0.22}
-          />
+      <g fill="none" strokeLinecap="round">
+        {[...rootYarnEdges, ...edges].map((e) => (
+          <g key={e.key}>
+            <path
+              d={edgePath(e)}
+              stroke="#2a1d10"
+              strokeWidth={e.preview ? "1.4" : "9.6"}
+              strokeDasharray={e.preview ? "4 6" : undefined}
+              strokeOpacity={e.preview ? 0.18 : e.cleared ? 0.08 : 0.18}
+            />
+            {!e.preview && (
+              <>
+                <path
+                  d={edgePath(e)}
+                  stroke={e.parentColor || "#7a5a3a"}
+                  strokeWidth={e.fakeRoot ? "6" : "6.4"}
+                  strokeDasharray="10 10"
+                  strokeDashoffset="0"
+                  strokeOpacity={e.cleared ? 0.74 : 1}
+                />
+                <path
+                  d={edgePath(e)}
+                  stroke={e.childColor || "#7a5a3a"}
+                  strokeWidth={e.fakeRoot ? "6" : "6.4"}
+                  strokeDasharray="10 10"
+                  strokeDashoffset="10"
+                  strokeOpacity={e.cleared ? 0.74 : 1}
+                />
+              </>
+            )}
+            {e.preview && (
+              <path
+                d={edgePath(e)}
+                stroke="#7a5a3a"
+                strokeWidth="1.25"
+                strokeDasharray="4 6"
+                strokeOpacity="0.34"
+              />
+            )}
+          </g>
         ))}
       </g>
 
       <g>
-        {forest.nodes.map((n) => {
-          if (!isRendered(n.id)) return null;
-          const p = pos.get(n.id);
-          const cx = p.x + offsetX;
-          const cy = p.y + offsetY;
-          const isRoot = n.parentId === null;
-          const cleared = isCleared(n.id);
-          const tappable = isTappable(n.id);
-          const playable = isPlayable(n.id);
-          const previewChild = isPreviewChild(n.id);
-          const pressPreviewing = previewNodeId === n.id;
-
-          return (
-            <g
-              key={n.id}
-              data-yarn-node="true"
-              transform={`translate(${cx}, ${cy})`}
-              style={{
-                cursor: tappable && onTap ? "pointer" : "default",
-                opacity: previewChild ? 0.82 : cleared ? 0.18 : stuck && !playable ? 0.52 : 1,
-                transition: "opacity 280ms ease",
-              }}
-              onPointerDown={(event) => onNodePointerDown(event, n.id, tappable && !cleared)}
-              onPointerUp={(event) => onNodePointerUp(event, n.id)}
-              onPointerCancel={(event) => onNodePointerCancel(event, n.id)}
-            >
-              <title>{`node ${n.id}: ${yarnTitle(n.color)}`}</title>
-              {!cleared && !previewChild && (
-                <circle
-                  r={NODE_R + 2}
-                  fill="#3b2a1a"
-                  opacity="0.2"
-                  filter="url(#paper-shadow)"
-                  transform="translate(1, 2)"
-                />
-              )}
-              {pressPreviewing && !cleared && (
-                <circle
-                  r={NODE_R + 12}
-                  fill="none"
-                  stroke="#2a1d10"
-                  strokeWidth="2"
-                  strokeDasharray="5 6"
-                  strokeOpacity="0.42"
-                />
-              )}
-              {playable && !cleared && !previewChild && (
-                <circle
-                  className="yp-pulse"
-                  r={NODE_R + 9}
-                  fill="none"
-                  stroke={n.color}
-                  strokeWidth="2.4"
-                  strokeOpacity="0.55"
-                />
-              )}
-              {stuck && tappable && !cleared && !previewChild && (
-                <circle
-                  className="yp-stuck-ring"
-                  r={NODE_R + 8}
-                  fill="none"
-                  stroke="#2a1d10"
-                  strokeWidth="2"
-                  strokeOpacity="0.42"
-                />
-              )}
-              {previewChild && (
-                <circle
-                  r={NODE_R + 5}
-                  fill="#fbf3df"
-                  stroke="#2a1d10"
-                  strokeWidth="1.8"
-                  strokeDasharray="5 5"
-                  opacity="0.88"
-                />
-              )}
-              <circle
-                r={NODE_R}
-                fill={n.color || "#dba66a"}
-                stroke={previewChild ? "#2a1d10" : "#3b2a1a"}
-                strokeWidth={previewChild ? "1.6" : "2"}
-              />
-              <circle r={NODE_R - 2} fill={`url(#${yarnPatternId(n.color)})`} />
-              {isRoot && (
-                <circle r={NODE_R - 10} fill="none" stroke="#2a1d10" strokeWidth="1.8" />
-              )}
-              {tappable && <circle r={NODE_R + 18} fill="transparent" />}
-            </g>
-          );
-        })}
+        {forest.nodes
+          .filter((n) => isRendered(n.id) && (isCleared(n.id) || isPreviewChild(n.id)))
+          .map(renderNode)}
       </g>
+
+      <g>
+        {forest.nodes
+          .filter((n) => isRendered(n.id) && !isCleared(n.id) && !isPreviewChild(n.id))
+          .map(renderNode)}
+      </g>
+
     </svg>
   );
 }
@@ -627,13 +958,21 @@ function buildInitialGameState(forest, baskets, spoolCapacity = NUM_SPOOLS) {
   );
   const visible = new Set(forest.rootIds);
   const cleared = new Set();
-  return { ...routed, visible, cleared };
+  return { ...routed, visible, cleared, clearedOrder: [] };
+}
+
+function findPreferredBasketSlot(active, color) {
+  const partialIdx = active.findIndex(
+    (b) => b && b.color === color && b.slots.length > 0 && b.slots.length < 3
+  );
+  if (partialIdx !== -1) return partialIdx;
+  return active.findIndex((b) => b && b.color === color && b.slots.length < 3);
 }
 
 // Internal helper: place a single node-color into the first matching active
 // basket. Returns updated `active` and `queue`, or null if no slot available.
 function tryPlaceColorInBasket(active, queue, color) {
-  const slotIdx = active.findIndex((b) => b && b.color === color && b.slots.length < 3);
+  const slotIdx = findPreferredBasketSlot(active, color);
   if (slotIdx === -1) return null;
 
   // Note: when called from a spool flush, we don't have a node id to put in
@@ -697,9 +1036,7 @@ function applyTapWithOptions(state, forest, nodeId, opts = {}) {
   let newSpools = state.spools;
   let wentToSpool = false;
 
-  const slotIdx = newActive.findIndex(
-    (b) => b && b.color === node.color && b.slots.length < 3
-  );
+  const slotIdx = findPreferredBasketSlot(newActive, node.color);
 
   if (slotIdx !== -1) {
     // Place in basket
@@ -733,6 +1070,7 @@ function applyTapWithOptions(state, forest, nodeId, opts = {}) {
   for (const cId of node.children) newVisible.add(cId);
   const newCleared = new Set(state.cleared);
   newCleared.add(nodeId);
+  const newClearedOrder = [...(state.clearedOrder || []), nodeId];
 
   // Auto-flush
   const flushed = autoFlush(newActive, newQueue, newSpools);
@@ -743,6 +1081,7 @@ function applyTapWithOptions(state, forest, nodeId, opts = {}) {
       active: flushed.active,
       visible: newVisible,
       cleared: newCleared,
+      clearedOrder: newClearedOrder,
       spools: flushed.spools,
     },
     ok: true,
@@ -770,6 +1109,7 @@ function makeStateForSimulation(forest, activationOrder, spoolCapacity) {
     ...routed,
     visible: new Set(forest.rootIds),
     cleared: new Set(),
+    clearedOrder: [],
   };
 }
 
@@ -1041,6 +1381,7 @@ export default function App() {
   const [debugOpen, setDebugOpen] = useState(false);
   const [shake, setShake] = useState(0);
   const [recenterKey, setRecenterKey] = useState(0);
+  const [pullEvent, setPullEvent] = useState(null);
   const difficultyConfig =
     DIFFICULTIES.find((option) => option.id === difficulty) || DIFFICULTIES[1];
   const numBaskets = difficultyConfig.baskets;
@@ -1065,6 +1406,7 @@ export default function App() {
   useEffect(() => {
     setGame(buildInitialGameState(forest, baskets, difficultyConfig.spools));
     setHistory([]);
+    setPullEvent(null);
   }, [forest, baskets, difficultyConfig.spools]);
 
   const reroll = useCallback(() => {
@@ -1079,6 +1421,7 @@ export default function App() {
   const restart = useCallback(() => {
     setGame(buildInitialGameState(forest, baskets, difficultyConfig.spools));
     setHistory([]);
+    setPullEvent(null);
     setRecenterKey((key) => key + 1);
   }, [forest, baskets, difficultyConfig.spools]);
 
@@ -1099,6 +1442,7 @@ export default function App() {
       const result = applyTap(game, forest, nodeId);
       if (result.ok) {
         setHistory((items) => [...items, game]);
+        setPullEvent((event) => ({ nodeId, key: (event?.key || 0) + 1 }));
         setGame(result.state);
       } else if (
         result.reason === "no matching basket and no spool space" ||
@@ -1114,6 +1458,7 @@ export default function App() {
     if (history.length === 0) return;
     setGame(history[history.length - 1]);
     setHistory(history.slice(0, -1));
+    setPullEvent(null);
   }, [history]);
 
   const stats = useMemo(() => {
@@ -1214,6 +1559,27 @@ export default function App() {
           50% { r: 33; opacity: 0.16; }
         }
         .yp-stuck-ring { animation: yp-stuck-ring 1300ms ease-in-out infinite; }
+        @keyframes yp-node-tug {
+          0% { transform: translate(0, 0) scale(1); }
+          44% { transform: translate(var(--yp-tug-x), var(--yp-tug-y)) scale(0.985); }
+          70% { transform: translate(var(--yp-tug-back-x), var(--yp-tug-back-y)) scale(1.004); }
+          100% { transform: translate(0, 0) scale(1); }
+        }
+        .yp-node-tug {
+          animation: yp-node-tug 520ms cubic-bezier(0.22, 0.88, 0.28, 1);
+          transform-box: fill-box;
+          transform-origin: center;
+        }
+        @keyframes yp-pile-enter {
+          0% { opacity: 1; }
+          70% { opacity: 0.86; }
+          100% { opacity: 1; }
+        }
+        .yp-pile-enter {
+          animation: yp-pile-enter 560ms ease-out forwards;
+          transform-box: fill-box;
+          transform-origin: center;
+        }
         @keyframes yp-shake {
           0%, 100% { transform: translateX(0); }
           20% { transform: translateX(-6px); }
@@ -1400,6 +1766,8 @@ export default function App() {
               tappableIds={tappableIds}
               playableIds={playableIds}
               stuck={stuck}
+              pullEvent={pullEvent}
+              clearedOrder={game.clearedOrder}
               onTap={onTap}
             />
           </ForestViewport>
@@ -1624,11 +1992,24 @@ export default function App() {
 // ────────────────────────────────────────────────────────────────────────────
 
 function ForestViewport({ children, focusKey }) {
+  const DEFAULT_ZOOM = 0.35;
   const ref = useRef(null);
+  const contentRef = useRef(null);
   const dragRef = useRef(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [needsScroll, setNeedsScroll] = useState(false);
   const canZoomOut = zoom > 0.36;
   const canZoomIn = zoom < 0.99;
+
+  const updateScrollNeed = useCallback(() => {
+    const viewport = ref.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    setNeedsScroll(
+      content.offsetWidth * zoom > viewport.clientWidth + 1 ||
+        content.offsetHeight * zoom > viewport.clientHeight + 1
+    );
+  }, [zoom]);
 
   const recenter = useCallback(() => {
     const viewport = ref.current;
@@ -1640,7 +2021,7 @@ function ForestViewport({ children, focusKey }) {
   const updateZoom = useCallback((nextZoom) => {
     setZoom((currentZoom) => {
       const viewport = ref.current;
-      const clampedZoom = Math.max(0.35, Math.min(1, nextZoom));
+      const clampedZoom = Math.max(DEFAULT_ZOOM, Math.min(1, nextZoom));
       if (!viewport || clampedZoom === currentZoom) return clampedZoom;
 
       const centerX = viewport.scrollLeft + viewport.clientWidth / 2;
@@ -1655,9 +2036,15 @@ function ForestViewport({ children, focusKey }) {
   }, []);
 
   useEffect(() => {
-    setZoom(1);
+    setZoom(DEFAULT_ZOOM);
     requestAnimationFrame(recenter);
   }, [focusKey, recenter]);
+
+  useEffect(() => {
+    requestAnimationFrame(updateScrollNeed);
+    window.addEventListener("resize", updateScrollNeed);
+    return () => window.removeEventListener("resize", updateScrollNeed);
+  }, [children, updateScrollNeed]);
 
   const onPointerDown = useCallback((event) => {
     if (event.button !== 0) return;
@@ -1726,7 +2113,7 @@ function ForestViewport({ children, focusKey }) {
         onWheel={onWheel}
         style={{
           height: "clamp(360px, 58vh, 640px)",
-          overflow: "auto",
+          overflow: needsScroll ? "auto" : "hidden",
           overscrollBehavior: "contain",
           WebkitOverflowScrolling: "touch",
           cursor: "grab",
@@ -1735,6 +2122,7 @@ function ForestViewport({ children, focusKey }) {
         }}
       >
         <div
+          ref={contentRef}
           style={{
             display: "inline-block",
             zoom,
