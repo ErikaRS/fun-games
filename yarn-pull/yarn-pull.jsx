@@ -82,16 +82,16 @@ function generateForest({ numBaskets, seed }) {
 // ────────────────────────────────────────────────────────────────────────────
 
 const YARN_COLORS = [
-  { hex: "#b51d2a", name: "brick", pattern: "cross" },
-  { hex: "#e87500", name: "orange", pattern: "vertical" },
-  { hex: "#c9a600", name: "ochre", pattern: "horizontal" },
-  { hex: "#12823b", name: "emerald", pattern: "forward" },
-  { hex: "#008b8b", name: "teal", pattern: "back" },
-  { hex: "#0067b1", name: "azure", pattern: "dots-light" },
-  { hex: "#7b2cbf", name: "purple", pattern: "grid" },
-  { hex: "#b0006d", name: "berry", pattern: "wide-forward" },
-  { hex: "#7f4f24", name: "umber", pattern: "dots-dark" },
-  { hex: "#343a40", name: "charcoal", pattern: "wide-back" },
+  { hex: "#36b7c9", name: "aqua", pattern: "cross" },
+  { hex: "#ffe055", name: "sunshine", pattern: "vertical" },
+  { hex: "#b9dc4a", name: "lime", pattern: "horizontal" },
+  { hex: "#4fb487", name: "mint leaf", pattern: "forward" },
+  { hex: "#ffad7a", name: "peach", pattern: "back" },
+  { hex: "#e170b8", name: "dragonfruit", pattern: "dots-light" },
+  { hex: "#ff7c86", name: "watermelon", pattern: "grid" },
+  { hex: "#a98be8", name: "ube", pattern: "wide-forward" },
+  { hex: "#7fcde0", name: "blue smoothie", pattern: "dots-dark" },
+  { hex: "#ffd0a6", name: "papaya cream", pattern: "wide-back" },
 ];
 
 const PALETTE = YARN_COLORS.map((color) => color.hex);
@@ -304,6 +304,11 @@ function layoutForest(forest, opts) {
   };
 }
 
+function stableUnit(seed) {
+  const n = Math.sin(seed * 12.9898) * 43758.5453;
+  return n - Math.floor(n);
+}
+
 function YarnSvgPatterns() {
   return (
     <>
@@ -345,12 +350,14 @@ function ForestSVG({
   stuck,
   pullEvent,
   clearedOrder,
+  variant = "classic",
 }) {
+  const cozy = variant === "cozy";
   const PAD = 76;
   const ROOT_RADIUS = 26;
   const RADIAL_GAP = 68;
   const MIN_NODE_ARC = 60;
-  const NODE_R = 24;
+  const NODE_R = cozy ? 22 : 24;
   const HOLD_PREVIEW_MS = 240;
   const holdRef = useRef(null);
   const [previewNodeId, setPreviewNodeId] = useState(null);
@@ -466,12 +473,16 @@ function ForestSVG({
     if (!showAll && node?.parentId === null) {
       const rootIndex = forest.rootIds.indexOf(nodeId);
       const count = Math.max(forest.rootIds.length, 1);
-      const organicAngles = [-Math.PI / 2 - 0.28, -Math.PI / 2 + 0.34, -Math.PI / 2 + 1.02, -Math.PI / 2 - 0.96];
-      const angle = organicAngles[rootIndex] ?? -Math.PI / 2 + (Math.PI * 2 * rootIndex) / count;
-      const radius = 24 + (rootIndex % 2) * 8 + Math.floor(rootIndex / 2) * 4;
+      const section = (Math.PI * 2) / count;
+      const angleJitter = (stableUnit(nodeId + 17) - 0.5) * section * 0.42;
+      const radiusJitter = (stableUnit(nodeId + 41) - 0.5) * 16;
+      const minRadiusForClearance =
+        count > 1 ? (NODE_R * 2 + 16) / (2 * Math.sin(Math.PI / count)) : 0;
+      const angle = -Math.PI / 2 + section * rootIndex + section / 2 + angleJitter;
+      const radius = Math.max(74, minRadiusForClearance) + radiusJitter;
       return {
         x: offsetX + Math.cos(angle) * radius,
-        y: offsetY + Math.sin(angle) * radius * 0.76,
+        y: offsetY + Math.sin(angle) * radius * 0.9,
       };
     }
 
@@ -775,9 +786,9 @@ function ForestSVG({
           {!cleared && !previewChild && (
             <circle
               r={NODE_R + 2}
-              fill="#3b2a1a"
-              opacity="0.2"
-              filter="url(#paper-shadow)"
+              fill={cozy ? "#6d5438" : "#3b2a1a"}
+              opacity={cozy ? "0.16" : "0.2"}
+              filter={cozy ? "url(#cozy-shadow)" : "url(#paper-shadow)"}
               transform="translate(1, 2)"
             />
           )}
@@ -821,18 +832,60 @@ function ForestSVG({
               opacity="0.88"
             />
           )}
-          <circle
-            r={NODE_R}
-            fill={n.color || "#dba66a"}
-            stroke={piled ? "#fbf3df" : previewChild ? "#2a1d10" : "#3b2a1a"}
-            strokeWidth={piled ? "2.8" : previewChild ? "1.6" : "2"}
-          />
-          <circle
-            r={NODE_R - 2}
-            fill={`url(#${yarnPatternId(n.color)})`}
-            opacity={piled ? "0.42" : "1"}
-          />
-          {piled && <circle r={NODE_R - 3} fill="#fbf3df" opacity="0.32" />}
+          {cozy ? (
+            <>
+              <clipPath id={`cozy-node-clip-${n.id}`}>
+                <circle r={NODE_R - 1} />
+              </clipPath>
+              <circle
+                r={NODE_R}
+                fill="#f8ecd3"
+                stroke={piled ? "#f8ecd3" : previewChild ? "#8b7358" : "#7b6042"}
+                strokeWidth={piled ? "2.2" : previewChild ? "1.4" : "1.6"}
+              />
+              <g clipPath={`url(#cozy-node-clip-${n.id})`}>
+                <circle r={NODE_R - 1} fill={n.color || "#dba66a"} opacity={piled ? 0.64 : 1} />
+                <circle r={NODE_R + 7} cx="-8" cy="-9" fill="#fff6e3" opacity="0.18" />
+                <circle r={NODE_R + 10} cx="10" cy="12" fill="#3d2a18" opacity="0.12" />
+                {[-18, -9, 0, 9, 18].map((y, i) => (
+                  <path
+                    key={`strand-a-${i}`}
+                    d={`M ${-NODE_R - 5} ${y} C ${-8} ${y - 10}, ${8} ${y + 10}, ${NODE_R + 5} ${y}`}
+                    fill="none"
+                    stroke="#fff7df"
+                    strokeWidth="2.4"
+                    strokeOpacity={piled ? "0.2" : "0.32"}
+                  />
+                ))}
+                {[-16, -5, 6, 17].map((x, i) => (
+                  <path
+                    key={`strand-b-${i}`}
+                    d={`M ${x} ${-NODE_R - 5} C ${x + 12} ${-8}, ${x - 12} ${8}, ${x} ${NODE_R + 5}`}
+                    fill="none"
+                    stroke="#442d1a"
+                    strokeWidth="1.7"
+                    strokeOpacity={piled ? "0.08" : "0.14"}
+                  />
+                ))}
+              </g>
+              <circle r={NODE_R - 0.5} fill="none" stroke="#fff8e6" strokeOpacity="0.62" />
+            </>
+          ) : (
+            <>
+              <circle
+                r={NODE_R}
+                fill={n.color || "#dba66a"}
+                stroke={piled ? "#fbf3df" : previewChild ? "#2a1d10" : "#3b2a1a"}
+                strokeWidth={piled ? "2.8" : previewChild ? "1.6" : "2"}
+              />
+              <circle
+                r={NODE_R - 2}
+                fill={`url(#${yarnPatternId(n.color)})`}
+                opacity={piled ? "0.42" : "1"}
+              />
+              {piled && <circle r={NODE_R - 3} fill="#fbf3df" opacity="0.32" />}
+            </>
+          )}
           {tappable && <circle r={NODE_R + 18} fill="transparent" />}
         </g>
       </g>
@@ -854,26 +907,49 @@ function ForestSVG({
         <filter id="paper-shadow" x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="1.2" />
         </filter>
+        <filter id="cozy-shadow" x="-35%" y="-35%" width="170%" height="170%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2.2" floodColor="#47525a" floodOpacity="0.16" />
+        </filter>
         <pattern id="grain" width="3" height="3" patternUnits="userSpaceOnUse">
           <rect width="3" height="3" fill="transparent" />
           <circle cx="1" cy="1" r="0.3" fill="#3b2a1a" opacity="0.06" />
         </pattern>
+        <pattern id="cozy-fabric" width="12" height="12" patternUnits="userSpaceOnUse">
+          <rect width="12" height="12" fill="#f7f5ef" />
+        </pattern>
         <YarnSvgPatterns />
       </defs>
 
-      <rect x="0" y="0" width={width} height={height} fill="url(#grain)" />
+      <rect x="0" y="0" width={width} height={height} fill={cozy ? "url(#cozy-fabric)" : "url(#grain)"} />
 
       <g fill="none" strokeLinecap="round">
         {[...rootYarnEdges, ...edges].map((e) => (
           <g key={e.key}>
             <path
               d={edgePath(e)}
-              stroke="#2a1d10"
-              strokeWidth={e.preview ? "1.4" : "9.6"}
-              strokeDasharray={e.preview ? "4 6" : undefined}
-              strokeOpacity={e.preview ? 0.18 : e.cleared ? 0.08 : 0.18}
+              stroke={cozy ? "#2a7fb0" : "#2a1d10"}
+              strokeWidth={e.preview ? "1.4" : cozy ? "8.2" : "9.6"}
+              strokeDasharray={e.preview ? (cozy ? "3 7" : "4 6") : undefined}
+              strokeOpacity={e.preview ? 0.18 : e.cleared ? 0.07 : cozy ? 0.16 : 0.18}
             />
-            {!e.preview && (
+            {!e.preview && cozy && (
+              <>
+                <path
+                  d={edgePath(e)}
+                  stroke={e.childColor || e.parentColor || "#7a5a3a"}
+                  strokeWidth={e.fakeRoot ? "5.2" : "5.6"}
+                  strokeOpacity={e.cleared ? 0.34 : 0.82}
+                />
+                <path
+                  d={edgePath(e)}
+                  stroke="#fff7df"
+                  strokeWidth="1.6"
+                  strokeOpacity={e.cleared ? 0.14 : 0.34}
+                  strokeDasharray="1 9"
+                />
+              </>
+            )}
+            {!e.preview && !cozy && (
               <>
                 <path
                   d={edgePath(e)}
@@ -933,11 +1009,6 @@ function ForestSVG({
 // ────────────────────────────────────────────────────────────────────────────
 
 const NUM_SPOOLS = 5;
-const PRESSURE_TARGET = {
-  minPlacements: 1,
-  maxPlacements: 3,
-  maxPeak: 3,
-};
 
 function buildInitialGameStateFromActivationOrder(activationOrder, spoolCapacity = NUM_SPOOLS) {
   const queue = activationOrder.map((b) => ({ ...b }));
@@ -1156,40 +1227,6 @@ function solveWithPreferredOrder(forest, activationOrder, preferredNodeOrder, sp
   return { ok: true, trace, spoolPlacements, peakSpoolOccupancy };
 }
 
-function replayTrace(forest, activationOrder, trace, spoolCapacity) {
-  let state = makeStateForSimulation(forest, activationOrder, spoolCapacity);
-  let spoolPlacements = 0;
-  let peakSpoolOccupancy = 0;
-
-  for (const nodeId of trace) {
-    const result = applyTapWithOptions(state, forest, nodeId, { spoolCapacity });
-    if (!result.ok) {
-      return { ok: false, spoolPlacements, peakSpoolOccupancy, reason: result.reason };
-    }
-    state = result.state;
-    if (result.wentToSpool) spoolPlacements++;
-    peakSpoolOccupancy = Math.max(
-      peakSpoolOccupancy,
-      state.spools.filter((s) => s !== null).length
-    );
-  }
-
-  return {
-    ok: state.cleared.size === forest.nodes.length,
-    spoolPlacements,
-    peakSpoolOccupancy,
-  };
-}
-
-function pressureIsInTarget(metrics, target = PRESSURE_TARGET) {
-  return (
-    metrics.ok &&
-    metrics.spoolPlacements >= target.minPlacements &&
-    metrics.spoolPlacements <= target.maxPlacements &&
-    metrics.peakSpoolOccupancy <= target.maxPeak
-  );
-}
-
 function moveBasket(order, fromIdx, toIdx) {
   const next = order.slice();
   const [basket] = next.splice(fromIdx, 1);
@@ -1247,10 +1284,35 @@ function shuffleCopy(items, rng) {
   return copy;
 }
 
+function makePressureCandidateEvents(forest, trace, rng, opts = {}) {
+  const earlyCandidateRatio = opts.earlyCandidateRatio ?? 0.6;
+  const candidateLimit = opts.candidateLimit ?? Infinity;
+  const randomJitter = opts.randomJitter ?? 4;
+  const events = trace
+    .map((nodeId, traceIdx) => ({ nodeId, traceIdx, node: forest.nodes[nodeId] }))
+    .filter(({ node }) => node.parentId !== null)
+    .map(({ nodeId, traceIdx, node }) => ({
+      nodeId,
+      // Low trace positions are colors the player encounters early. Depth keeps
+      // the search from only targeting root-adjacent nodes on very broad trees.
+      priority: traceIdx + node.depth * 2 + rng() * randomJitter,
+    }))
+    .sort((a, b) => a.priority - b.priority);
+
+  const preferredCount = Math.max(6, Math.ceil(events.length * earlyCandidateRatio));
+  const preferred = events.slice(0, preferredCount).map((event) => event.nodeId);
+  const rest = shuffleCopy(events.slice(preferredCount).map((event) => event.nodeId), rng);
+  return [...preferred, ...rest].slice(0, candidateLimit);
+}
+
 function addSpoolPressure(forest, baskets, rng, opts = {}) {
   const spoolCapacity = opts.spoolCapacity ?? NUM_SPOOLS;
-  const pressureTarget = opts.pressureTarget ?? PRESSURE_TARGET;
   const maxLag = opts.maxLag ?? 8;
+  const forcedSpoolChance = opts.forcedSpoolChance ?? 1;
+  if (rng() > forcedSpoolChance) {
+    return { baskets, metrics: { pressured: false, reason: "pressure-skipped" } };
+  }
+
   const safeActivationOrder = baskets.slice().reverse();
   const safePreference = makeSafePreferenceOrder(baskets);
   const safeSolve = solveWithPreferredOrder(forest, safeActivationOrder, safePreference, 0);
@@ -1258,70 +1320,75 @@ function addSpoolPressure(forest, baskets, rng, opts = {}) {
     return { baskets, metrics: { pressured: false, reason: "safe-solve-failed" } };
   }
 
-  const candidateEvents = shuffleCopy(
-    safeSolve.trace.filter((nodeId) => forest.nodes[nodeId].parentId !== null),
-    rng
-  );
+  const candidateEvents = makePressureCandidateEvents(forest, safeSolve.trace, rng, opts);
   let checkedCandidates = 0;
-  const candidateBudget = forest.nodes.length > 90 ? 18 : forest.nodes.length > 60 ? 36 : 72;
+  const candidateBudget =
+    opts.candidateBudget ?? (forest.nodes.length > 90 ? 36 : forest.nodes.length > 60 ? 72 : 120);
   const zeroSpoolStateBudget =
     forest.nodes.length > 90 ? 300 : forest.nodes.length > 60 ? 1200 : 4000;
-  let bestPressured = null;
 
   for (const nodeId of candidateEvents) {
     const basketId = forest.nodes[nodeId].basketId;
     const fromIdx = safeActivationOrder.findIndex((b) => b.id === basketId);
     if (fromIdx === -1) continue;
 
-    for (let lag = 1; lag <= maxLag; lag++) {
+    for (let lag = maxLag; lag >= 1; lag--) {
       checkedCandidates++;
       if (checkedCandidates > candidateBudget) {
-        return bestPressured || {
+        return {
           baskets,
           metrics: { pressured: false, reason: "pressure-search-budget-exhausted" },
         };
       }
+
       const toIdx = Math.min(safeActivationOrder.length - 1, fromIdx + lag);
       if (toIdx === fromIdx) continue;
 
       const candidateOrder = moveBasket(safeActivationOrder, fromIdx, toIdx);
-      const replay = replayTrace(forest, candidateOrder, safeSolve.trace, spoolCapacity);
-      if (!replay.ok || replay.peakSpoolOccupancy > pressureTarget.maxPeak) continue;
+      const witness = solveWithPreferredOrder(
+        forest,
+        candidateOrder,
+        safePreference,
+        spoolCapacity
+      );
+      if (!witness.ok) continue;
 
       const zeroSpool = hasZeroSpoolSolution(forest, candidateOrder, zeroSpoolStateBudget);
       if (zeroSpool !== false) continue;
 
-      const pressuredCandidate = {
+      return {
         baskets: candidateOrder.slice().reverse(),
         metrics: {
           pressured: true,
-          spoolPlacements: replay.spoolPlacements,
-          peakSpoolOccupancy: replay.peakSpoolOccupancy,
+          forcedSpool: true,
+          delayMoves: 1,
+          spoolPlacements: witness.spoolPlacements,
+          peakSpoolOccupancy: witness.peakSpoolOccupancy,
           zeroSpoolRejected: true,
         },
       };
-
-      if (pressureIsInTarget(replay, pressureTarget)) return pressuredCandidate;
-
-      if (
-        !bestPressured ||
-        replay.spoolPlacements > bestPressured.metrics.spoolPlacements ||
-        (replay.spoolPlacements === bestPressured.metrics.spoolPlacements &&
-          replay.peakSpoolOccupancy > bestPressured.metrics.peakSpoolOccupancy)
-      ) {
-        bestPressured = pressuredCandidate;
-      }
     }
   }
 
-  return bestPressured || {
+  return {
     baskets,
     metrics: { pressured: false, reason: "no-certified-pressure-order" },
   };
 }
 
-function generatePressuredPuzzle({ numBaskets, seed, spoolCapacity, pressureTarget, maxLag }) {
+function generatePressuredPuzzle({
+  numBaskets,
+  seed,
+  spoolCapacity,
+  maxLag,
+  forcedSpoolChance,
+  earlyCandidateRatio,
+  candidateBudget,
+  candidateLimit,
+}) {
   let fallback = null;
+  const pressureEnabled =
+    forcedSpoolChance === undefined || makeRng(seed ^ 0x51a7e1ed)() <= forcedSpoolChance;
   for (let attempt = 0; attempt < 8; attempt++) {
     const attemptSeed = (seed + attempt * 7919) >>> 0;
     const forest = generateForest({ numBaskets, seed: attemptSeed });
@@ -1330,8 +1397,11 @@ function generatePressuredPuzzle({ numBaskets, seed, spoolCapacity, pressureTarg
     const pressureRng = makeRng(attemptSeed ^ 0x91e10da5);
     const pressured = addSpoolPressure(forest, baskets, pressureRng, {
       spoolCapacity,
-      pressureTarget,
       maxLag,
+      forcedSpoolChance: pressureEnabled ? 1 : 0,
+      earlyCandidateRatio,
+      candidateBudget,
+      candidateLimit,
     });
     if (!fallback) fallback = { forest, baskets, pressure: pressured.metrics };
     if (pressured.metrics.pressured) {
@@ -1354,28 +1424,37 @@ const DIFFICULTIES = [
     label: "Easy",
     baskets: 12,
     spools: 5,
-    pressureTarget: { minPlacements: 1, maxPlacements: 3, maxPeak: 3 },
     maxLag: 8,
+    forcedSpoolChance: 0.38,
+    earlyCandidateRatio: 0.45,
+    candidateBudget: 72,
+    candidateLimit: 10,
   },
   {
     id: "medium",
     label: "Medium",
     baskets: 18,
     spools: 4,
-    pressureTarget: { minPlacements: 2, maxPlacements: 5, maxPeak: 4 },
     maxLag: 12,
+    forcedSpoolChance: 0.76,
+    earlyCandidateRatio: 0.6,
+    candidateBudget: 420,
+    candidateLimit: 14,
   },
   {
     id: "hard",
     label: "Hard",
     baskets: 24,
     spools: 3,
-    pressureTarget: { minPlacements: 3, maxPlacements: 7, maxPeak: 3 },
     maxLag: 16,
+    forcedSpoolChance: 0.96,
+    earlyCandidateRatio: 0.72,
+    candidateBudget: 960,
+    candidateLimit: 16,
   },
 ];
 
-export default function App() {
+function useYarnPullGame() {
   const [difficulty, setDifficulty] = useState("medium");
   const [seed, setSeed] = useState(42);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -1392,8 +1471,11 @@ export default function App() {
         numBaskets,
         seed,
         spoolCapacity: difficultyConfig.spools,
-        pressureTarget: difficultyConfig.pressureTarget,
         maxLag: difficultyConfig.maxLag,
+        forcedSpoolChance: difficultyConfig.forcedSpoolChance,
+        earlyCandidateRatio: difficultyConfig.earlyCandidateRatio,
+        candidateBudget: difficultyConfig.candidateBudget,
+        candidateLimit: difficultyConfig.candidateLimit,
       }),
     [numBaskets, seed, difficultyConfig]
   );
@@ -1469,6 +1551,58 @@ export default function App() {
     for (const n of forest.nodes) branchHist[n.children.length]++;
     return { rootCount, leafCount, maxDepth, branchHist };
   }, [forest]);
+
+  return {
+    baskets,
+    changeDifficulty,
+    debugOpen,
+    difficulty,
+    difficultyConfig,
+    forest,
+    game,
+    history,
+    onTap,
+    playableIds,
+    pressure,
+    pullEvent,
+    recenterKey,
+    reroll,
+    restart,
+    setDebugOpen,
+    shake,
+    stats,
+    stuck,
+    tappableIds,
+    undo,
+    won,
+  };
+}
+
+export function ClassicYarnPullApp() {
+  const {
+    baskets,
+    changeDifficulty,
+    debugOpen,
+    difficulty,
+    difficultyConfig,
+    forest,
+    game,
+    history,
+    onTap,
+    playableIds,
+    pressure,
+    pullEvent,
+    recenterKey,
+    reroll,
+    restart,
+    setDebugOpen,
+    shake,
+    stats,
+    stuck,
+    tappableIds,
+    undo,
+    won,
+  } = useYarnPullGame();
 
   return (
     <div
@@ -1830,7 +1964,7 @@ export default function App() {
                   [
                     "Pressure",
                     pressure.pressured
-                      ? `${pressure.spoolPlacements} / ${pressure.peakSpoolOccupancy}`
+                      ? `${pressure.spoolPlacements} / ${pressure.peakSpoolOccupancy} · d${pressure.delayMoves}`
                       : "safe",
                   ],
                 ].map(([label, value], i) => (
@@ -1987,11 +2121,333 @@ export default function App() {
   );
 }
 
+export function CozyYarnPullApp() {
+  const {
+    changeDifficulty,
+    difficulty,
+    forest,
+    game,
+    history,
+    onTap,
+    playableIds,
+    pullEvent,
+    recenterKey,
+    reroll,
+    restart,
+    shake,
+    stuck,
+    tappableIds,
+    undo,
+    won,
+  } = useYarnPullGame();
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background:
+          "linear-gradient(180deg, #f5f3ef 0%, #f8f7f3 48%, #eef4ee 100%)",
+        fontFamily: FONT_BODY,
+        color: "#25313a",
+        padding: "14px",
+        boxSizing: "border-box",
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@500&display=swap');
+        .cozy-shell button {
+          font-family: ${FONT_BODY};
+        }
+        button.cozy-btn {
+          border: 1px solid rgba(61, 78, 91, 0.14);
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.92);
+          color: #25313a;
+          padding: 8px 12px;
+          font-size: 13px;
+          font-weight: 800;
+          cursor: pointer;
+          box-shadow: 0 5px 16px rgba(54, 64, 70, 0.09);
+          transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
+        }
+        button.cozy-btn:hover {
+          transform: translateY(-1px);
+          background: #ffffff;
+          box-shadow: 0 8px 20px rgba(54, 64, 70, 0.12);
+        }
+        button.cozy-btn.primary {
+          background: #e277ba;
+          color: white;
+          border-color: #d75faa;
+        }
+        button.cozy-btn:disabled,
+        button.cozy-btn:disabled:hover {
+          opacity: 0.42;
+          transform: none;
+          cursor: default;
+          box-shadow: none;
+        }
+        button.cozy-seg {
+          border: 0;
+          background: transparent;
+          color: #52606a;
+          border-radius: 999px;
+          padding: 6px 10px;
+          font-size: 12px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        button.cozy-seg.active {
+          background: #4bb7c9;
+          color: white;
+          box-shadow: inset 0 -2px 0 rgba(0, 98, 116, 0.16);
+        }
+        @keyframes yp-pulse {
+          0%, 100% { r: 19; opacity: 0.55; }
+          50% { r: 23; opacity: 0.15; }
+        }
+        .yp-pulse { animation: yp-pulse 1800ms ease-in-out infinite; }
+        @keyframes yp-stuck-ring {
+          0%, 100% { r: 29; opacity: 0.38; }
+          50% { r: 33; opacity: 0.16; }
+        }
+        .yp-stuck-ring { animation: yp-stuck-ring 1300ms ease-in-out infinite; }
+        @keyframes yp-node-tug {
+          0% { transform: translate(0, 0) scale(1); }
+          44% { transform: translate(var(--yp-tug-x), var(--yp-tug-y)) scale(0.985); }
+          70% { transform: translate(var(--yp-tug-back-x), var(--yp-tug-back-y)) scale(1.004); }
+          100% { transform: translate(0, 0) scale(1); }
+        }
+        .yp-node-tug {
+          animation: yp-node-tug 520ms cubic-bezier(0.22, 0.88, 0.28, 1);
+          transform-box: fill-box;
+          transform-origin: center;
+        }
+        @keyframes yp-pile-enter {
+          0% { opacity: 1; }
+          70% { opacity: 0.86; }
+          100% { opacity: 1; }
+        }
+        .yp-pile-enter {
+          animation: yp-pile-enter 560ms ease-out forwards;
+          transform-box: fill-box;
+          transform-origin: center;
+        }
+        @keyframes yp-shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-6px); }
+          40% { transform: translateX(6px); }
+          60% { transform: translateX(-3px); }
+          80% { transform: translateX(3px); }
+        }
+        .yp-shake { animation: yp-shake 360ms ease; }
+        @keyframes yp-pop {
+          0% { transform: scale(0.4); opacity: 0; }
+          60% { transform: scale(1.18); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .yp-pop { animation: yp-pop 280ms ease-out; transform-origin: center; }
+        .cozy-layout {
+          max-width: 1240px;
+          margin: 0 auto;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .cozy-topbar {
+          min-height: 42px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 7px 9px 7px 14px;
+          border-radius: 22px;
+          background: rgba(255, 255, 255, 0.82);
+          border: 1px solid rgba(61, 78, 91, 0.12);
+          box-shadow: 0 8px 24px rgba(54, 64, 70, 0.08);
+        }
+        .cozy-title {
+          font-size: 20px;
+          font-weight: 900;
+          letter-spacing: 0;
+          white-space: nowrap;
+        }
+        .cozy-actions {
+          display: flex;
+          gap: 7px;
+          margin-left: auto;
+        }
+        .cozy-tray {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 9px 10px;
+          border-radius: 18px;
+          background: rgba(255, 255, 255, 0.8);
+          border: 1px solid rgba(61, 78, 91, 0.12);
+          box-shadow: 0 8px 24px rgba(54, 64, 70, 0.07);
+        }
+        @media (max-width: 820px) {
+          .cozy-topbar { flex-wrap: wrap; }
+          .cozy-actions { margin-left: 0; }
+          .cozy-tray { align-items: flex-start; flex-direction: column; }
+        }
+      `}</style>
+
+      <main className="cozy-shell cozy-layout">
+        <header className="cozy-topbar">
+          <div className="cozy-title">Untangle</div>
+          <div
+            aria-label="Difficulty"
+            style={{
+              display: "flex",
+              gap: 4,
+              padding: 3,
+              borderRadius: 999,
+              background: "rgba(244, 244, 239, 0.92)",
+              border: "1px solid rgba(61, 78, 91, 0.1)",
+            }}
+          >
+            {DIFFICULTIES.map((option) => (
+              <button
+                key={option.id}
+                className={`cozy-seg${difficulty === option.id ? " active" : ""}`}
+                onClick={() => changeDifficulty(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="cozy-actions">
+            <button className="cozy-btn" onClick={restart}>
+              Restart
+            </button>
+            <button className="cozy-btn primary" onClick={reroll}>
+              New puzzle
+            </button>
+          </div>
+        </header>
+
+        <section
+          style={{
+            minWidth: 0,
+            borderRadius: 20,
+            background: "#f7f5ef",
+            border: "1px solid rgba(61, 78, 91, 0.12)",
+            boxShadow: "0 18px 44px rgba(54, 64, 70, 0.1)",
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: 12,
+              left: 12,
+              zIndex: 2,
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            <button
+              className="cozy-btn"
+              onClick={undo}
+              disabled={history.length === 0}
+              title="Undo last move"
+              style={{ padding: "8px 12px", background: "rgba(255, 255, 255, 0.92)" }}
+            >
+              Undo
+            </button>
+          </div>
+
+          {stuck && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                top: 58,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 2,
+                borderRadius: 8,
+                background: "rgba(255, 255, 255, 0.94)",
+                border: "1px solid rgba(61, 78, 91, 0.13)",
+                boxShadow: "0 10px 26px rgba(54, 64, 70, 0.12)",
+                padding: "10px 14px",
+                maxWidth: "min(360px, calc(100% - 32px))",
+                textAlign: "center",
+                fontWeight: 700,
+              }}
+            >
+              No open basket or spool can take these threads.
+            </div>
+          )}
+
+          <ForestViewport
+            focusKey={`cozy-${difficulty}-${forest.actual}-${recenterKey}`}
+            variant="cozy"
+          >
+            <ForestSVG
+              forest={forest}
+              visibleIds={game.visible}
+              clearedIds={game.cleared}
+              tappableIds={tappableIds}
+              playableIds={playableIds}
+              stuck={stuck}
+              pullEvent={pullEvent}
+              clearedOrder={game.clearedOrder}
+              onTap={onTap}
+              variant="cozy"
+            />
+          </ForestViewport>
+
+          {won && (
+            <div
+              style={{
+                position: "absolute",
+                right: 14,
+                bottom: 14,
+                zIndex: 2,
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                borderRadius: 8,
+                background: "rgba(255, 255, 255, 0.94)",
+                border: "1px solid rgba(61, 78, 91, 0.13)",
+                padding: "10px 12px",
+                boxShadow: "0 10px 26px rgba(54, 64, 70, 0.12)",
+              }}
+            >
+              <span style={{ fontSize: 16, fontWeight: 900 }}>All tucked away.</span>
+              <button className="cozy-btn primary" onClick={reroll}>
+                Another
+              </button>
+            </div>
+          )}
+        </section>
+
+        <section className="cozy-tray">
+          <CozyBasketsRow active={game.active} shakeKey={shake} />
+          <CozySpoolsRow spools={game.spools} />
+        </section>
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  return <CozyYarnPullApp />;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // SUB-COMPONENTS
 // ────────────────────────────────────────────────────────────────────────────
 
-function ForestViewport({ children, focusKey }) {
+function ForestViewport({ children, focusKey, variant = "classic" }) {
+  const cozy = variant === "cozy";
   const DEFAULT_ZOOM = 0.35;
   const ref = useRef(null);
   const contentRef = useRef(null);
@@ -2101,6 +2557,30 @@ function ForestViewport({ children, focusKey }) {
     [updateZoom, zoom]
   );
 
+  if (cozy) {
+    return (
+      <div
+        style={{
+          height: "clamp(340px, 54vh, 600px)",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          touchAction: "manipulation",
+          userSelect: "none",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: "relative" }}>
       <div
@@ -2112,7 +2592,7 @@ function ForestViewport({ children, focusKey }) {
         onClickCapture={onClickCapture}
         onWheel={onWheel}
         style={{
-          height: "clamp(360px, 58vh, 640px)",
+          height: cozy ? "clamp(340px, 54vh, 600px)" : "clamp(360px, 58vh, 640px)",
           overflow: needsScroll ? "auto" : "hidden",
           overscrollBehavior: "contain",
           WebkitOverflowScrolling: "touch",
@@ -2140,24 +2620,25 @@ function ForestViewport({ children, focusKey }) {
           display: "flex",
           gap: 4,
           padding: 4,
-          background: "rgba(251, 243, 223, 0.86)",
-          border: "1.5px solid #2a1d10",
-          boxShadow: "2px 2px 0 rgba(42, 29, 16, 0.24)",
+          background: cozy ? "rgba(255, 255, 255, 0.9)" : "rgba(251, 243, 223, 0.86)",
+          border: cozy ? "1px solid rgba(34, 102, 143, 0.18)" : "1.5px solid #2a1d10",
+          borderRadius: cozy ? 999 : 0,
+          boxShadow: cozy ? "0 6px 18px rgba(24, 91, 135, 0.13)" : "2px 2px 0 rgba(42, 29, 16, 0.24)",
         }}
       >
         <button
-          className="ypmapbtn"
+          className={cozy ? "cozy-map" : "ypmapbtn"}
           disabled={!canZoomOut}
           onClick={() => updateZoom(zoom - 0.12)}
           title="Zoom out"
         >
           -
         </button>
-        <button className="ypmapbtn" onClick={recenter} title="Recenter">
+        <button className={cozy ? "cozy-map" : "ypmapbtn"} onClick={recenter} title="Recenter">
           ⊙
         </button>
         <button
-          className="ypmapbtn"
+          className={cozy ? "cozy-map" : "ypmapbtn"}
           disabled={!canZoomIn}
           onClick={() => updateZoom(zoom + 0.12)}
           title="Zoom toward default"
@@ -2398,6 +2879,122 @@ function SpoolsRow({ spools }) {
             />
           )}
         </div>
+      ))}
+    </section>
+  );
+}
+
+function CozyBasketsRow({ active, shakeKey }) {
+  return (
+    <section
+      key={`cozy-shake-${shakeKey}`}
+      className={shakeKey > 0 ? "yp-shake" : ""}
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        alignItems: "center",
+      }}
+    >
+      {active.map((basket, i) => (
+        <CozyBasketCell
+          key={`cozy-slot-${i}-${basket ? basket.color + "-" + basket.slots.length : "empty"}`}
+          basket={basket}
+          index={i}
+        />
+      ))}
+    </section>
+  );
+}
+
+function CozyBasketCell({ basket, index }) {
+  return (
+    <div
+      title={basket ? yarnTitle(basket.color) : `empty basket ${index + 1}`}
+      style={{
+        width: 112,
+        minWidth: 112,
+        height: 54,
+        borderRadius: 14,
+        border: `3px solid ${basket ? basket.color : "rgba(126, 168, 194, 0.45)"}`,
+        background: "linear-gradient(180deg, #ffffff 0%, #eef9ff 100%)",
+        boxShadow: basket
+          ? `0 7px 16px rgba(54, 64, 70, 0.1), inset 0 -4px 0 ${basket.color}22`
+          : "inset 0 -4px 0 rgba(126, 168, 194, 0.12)",
+        opacity: basket ? 1 : 0.68,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxSizing: "border-box",
+      }}
+    >
+      <div style={{ display: "flex", gap: 8 }}>
+        {[0, 1, 2].map((s) => {
+          const filled = basket?.slots[s] !== undefined;
+          return (
+            <div
+              key={s}
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: "50%",
+                border: `2px solid ${basket ? basket.color : "rgba(126, 168, 194, 0.5)"}`,
+                background: filled
+                  ? `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.38), transparent 34%), ${basket.color}`
+                  : "linear-gradient(180deg, #e2f5ff 0%, #f9fdff 100%)",
+                boxShadow: filled
+                  ? "inset 0 0 0 5px rgba(255, 255, 255, 0.32)"
+                  : "inset 0 2px 4px rgba(54, 64, 70, 0.1)",
+              }}
+            >
+              {filled && (
+                <div
+                  className="yp-pop"
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    margin: 5,
+                    background: "rgba(0, 80, 130, 0.18)",
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CozySpoolsRow({ spools }) {
+  return (
+    <section
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 7,
+        alignItems: "center",
+        justifyContent: "flex-end",
+      }}
+    >
+      {spools.map((color, i) => (
+        <div
+          key={i}
+          title={color ? yarnTitle(color) : `empty spool ${i + 1}`}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: "50%",
+            border: "2px solid rgba(84, 139, 172, 0.45)",
+            background: color
+              ? `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.36), transparent 32%), ${color}`
+              : "linear-gradient(180deg, #e2f5ff 0%, #ffffff 100%)",
+            boxShadow: color
+              ? "inset 0 0 0 7px rgba(255, 255, 255, 0.34), 0 4px 10px rgba(54, 64, 70, 0.1)"
+              : "inset 0 2px 4px rgba(54, 64, 70, 0.1)",
+          }}
+        />
       ))}
     </section>
   );
