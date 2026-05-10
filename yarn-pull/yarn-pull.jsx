@@ -90,7 +90,7 @@ const YARN_COLORS = [
   { hex: "#e170b8", name: "dragonfruit", pattern: "dots-light" },
   { hex: "#ff7c86", name: "watermelon", pattern: "grid" },
   { hex: "#a98be8", name: "ube", pattern: "wide-forward" },
-  { hex: "#7fcde0", name: "blue smoothie", pattern: "dots-dark" },
+  { hex: "#4f7fe8", name: "blue smoothie", pattern: "dots-dark" },
   { hex: "#ffd0a6", name: "papaya cream", pattern: "wide-back" },
 ];
 
@@ -491,7 +491,7 @@ function ForestSVG({
 
   const pileAvoidRadius = showAll
     ? 0
-    : Math.min(148, 66 + Math.sqrt(Math.max(0, pileOrder.size)) * 9);
+    : Math.min(82, 38 + Math.sqrt(Math.max(0, pileOrder.size)) * 4.5);
 
   const baseActiveNodePoint = (nodeId) => {
     const p = nodePoint(nodeId);
@@ -516,22 +516,83 @@ function ForestSVG({
     };
   };
 
+  const preferredActiveNodePoint = (nodeId, basePoints) => {
+    const base = basePoints.get(nodeId);
+    const node = forest.nodes[nodeId];
+    if (!base || showAll || !node || node.parentId === null || !isCleared(node.parentId)) return base;
+
+    const parentPoint = basePoints.get(node.parentId) || baseActiveNodePoint(node.parentId);
+    if (!parentPoint) return base;
+
+    const siblings = forest.nodes[node.parentId].children.filter((id) => isRendered(id) && !isCleared(id));
+    const siblingIndex = Math.max(0, siblings.indexOf(nodeId));
+    const siblingCount = Math.max(1, siblings.length);
+    if (siblingCount === 1) {
+      return {
+        x: parentPoint.x + (base.x - parentPoint.x) * 0.08,
+        y: parentPoint.y + (base.y - parentPoint.y) * 0.08,
+      };
+    }
+
+    const parentAngle = Math.atan2(parentPoint.y - offsetY, parentPoint.x - offsetX);
+    const arc = Math.min(Math.PI * 0.62, 0.34 + siblingCount * 0.18);
+    const angle =
+      parentAngle - arc / 2 + (arc * siblingIndex) / Math.max(1, siblingCount - 1);
+    const radius = NODE_R + 7 + Math.max(0, siblingCount - 2) * 2;
+    return {
+      x: parentPoint.x + Math.cos(angle) * radius,
+      y: parentPoint.y + Math.sin(angle) * radius,
+    };
+  };
+
+  const firstCollisionFreePoint = (preferred, placedPoints, clearance, centerClearance, seed) => {
+    const isOpen = (point) => {
+      if (Math.hypot(point.x - offsetX, point.y - offsetY) < centerClearance) return false;
+      return placedPoints.every((other) => Math.hypot(point.x - other.x, point.y - other.y) >= clearance);
+    };
+
+    if (isOpen(preferred)) return preferred;
+
+    const startAngle = stableUnit(seed + 101) * Math.PI * 2;
+    for (const radius of [8, 16, 25, 36, 50, 66, 84, 106]) {
+      const steps = Math.max(8, Math.ceil((Math.PI * 2 * radius) / clearance) + 2);
+      for (let i = 0; i < steps; i++) {
+        const angle = startAngle + (Math.PI * 2 * i) / steps;
+        const point = {
+          x: preferred.x + Math.cos(angle) * radius,
+          y: preferred.y + Math.sin(angle) * radius,
+        };
+        if (isOpen(point)) return point;
+      }
+    }
+
+    const awayAngle = Math.atan2(preferred.y - offsetY, preferred.x - offsetX);
+    return {
+      x: offsetX + Math.cos(awayAngle) * (centerClearance + clearance),
+      y: offsetY + Math.sin(awayAngle) * (centerClearance + clearance),
+    };
+  };
+
   const pilePoint = (nodeId) => {
     const index = pileOrder.get(nodeId);
     if (index === undefined) return null;
     if (index === 0) {
       return {
         x: offsetX,
-        y: offsetY,
+        y: offsetY + 12,
       };
     }
 
-    const ring = Math.floor((Math.sqrt(index) + 1) / 2);
-    const angle = index * 2.399963229728653;
-    const radius = 8 + ring * 10 + (index % 3) * 1.7;
+    const row = Math.floor((Math.sqrt(8 * index + 1) - 1) / 2);
+    const rowStart = (row * (row + 1)) / 2;
+    const slot = index - rowStart;
+    const slots = row + 1;
+    const spacing = NODE_R * 0.84;
+    const x = (slot - (slots - 1) / 2) * spacing;
+    const y = 12 + row * (NODE_R * 0.46);
     return {
-      x: offsetX + Math.cos(angle) * radius,
-      y: offsetY + Math.sin(angle) * radius * 0.82,
+      x: offsetX + x,
+      y: offsetY + y,
     };
   };
 
@@ -540,49 +601,40 @@ function ForestSVG({
     const activeNodeIds = forest.nodes
       .filter((node) => isRendered(node.id) && !isCleared(node.id))
       .map((node) => node.id);
+    const allRelevantNodeIds = [...new Set([...activeNodeIds, ...activeNodeIds.map((id) => forest.nodes[id]?.parentId).filter((id) => id !== null && id !== undefined)])];
     const basePoints = new Map(
-      activeNodeIds
+      allRelevantNodeIds
         .map((id) => [id, baseActiveNodePoint(id)])
         .filter(([, point]) => point)
     );
-    const clearance = NODE_R * 2 + 7;
-    const centerClearance = pileAvoidRadius + NODE_R + 7;
+    const clearance = NODE_R * 2 + 8;
+    const centerClearance = pileAvoidRadius + NODE_R + 3;
+    const preferredPoints = new Map(
+      activeNodeIds
+        .map((id) => [id, preferredActiveNodePoint(id, basePoints)])
+        .filter(([, point]) => point)
+    );
+    const orderedNodeIds = [...activeNodeIds].sort((a, b) => {
+      const ap = preferredPoints.get(a);
+      const bp = preferredPoints.get(b);
+      const ad = ap ? Math.hypot(ap.x - offsetX, ap.y - offsetY) : 0;
+      const bd = bp ? Math.hypot(bp.x - offsetX, bp.y - offsetY) : 0;
+      return ad - bd || forest.nodes[a].depth - forest.nodes[b].depth || a - b;
+    });
+    const placedPoints = [];
 
-    for (const nodeId of activeNodeIds) {
-      const node = forest.nodes[nodeId];
-      const base = basePoints.get(nodeId);
-      if (!base) continue;
-
-      let point = base;
-      const parentCleared = node.parentId !== null && isCleared(node.parentId);
-
-      if (parentCleared) {
-        for (const amount of [0.5, 0.4, 0.3, 0.2, 0.1]) {
-          const candidate = {
-            x: base.x + (offsetX - base.x) * amount,
-            y: base.y + (offsetY - base.y) * amount,
-          };
-          const centerDistance = Math.hypot(candidate.x - offsetX, candidate.y - offsetY);
-          if (centerDistance < centerClearance) continue;
-
-          let overlaps = false;
-          for (const otherId of activeNodeIds) {
-            if (otherId === nodeId) continue;
-            const other = activePointMap.get(otherId) || basePoints.get(otherId);
-            if (!other) continue;
-            if (Math.hypot(candidate.x - other.x, candidate.y - other.y) < clearance) {
-              overlaps = true;
-              break;
-            }
-          }
-          if (!overlaps) {
-            point = candidate;
-            break;
-          }
-        }
-      }
-
+    for (const nodeId of orderedNodeIds) {
+      const preferred = preferredPoints.get(nodeId);
+      if (!preferred) continue;
+      const point = firstCollisionFreePoint(
+        preferred,
+        placedPoints,
+        clearance,
+        centerClearance,
+        nodeId
+      );
       activePointMap.set(nodeId, point);
+      placedPoints.push(point);
     }
   }
 
@@ -771,17 +823,6 @@ function ForestSVG({
               keySplines="0.22 0.82 0.24 1;0.22 1 0.36 1"
             />
           )}
-          {pileEntryPath && (
-            <animateTransform
-              attributeName="transform"
-              type="scale"
-              additive="sum"
-              dur="560ms"
-              values="1;0.9;1.045;1"
-              keyTimes="0;0.66;0.84;1"
-              fill="freeze"
-            />
-          )}
           <title>{`node ${n.id}: ${yarnTitle(n.color)}`}</title>
           {!cleared && !previewChild && (
             <circle
@@ -921,6 +962,21 @@ function ForestSVG({
       </defs>
 
       <rect x="0" y="0" width={width} height={height} fill={cozy ? "url(#cozy-fabric)" : "url(#grain)"} />
+
+      {!showAll && pileOrder.size > 0 && cozy && (
+        <g pointerEvents="none">
+          <circle
+            cx={offsetX}
+            cy={offsetY + 15}
+            r={Math.min(60, 34 + Math.sqrt(pileOrder.size) * 4.8)}
+            fill="#dff4f8"
+            fillOpacity="0.22"
+            stroke="#54a7ba"
+            strokeWidth="2.6"
+            strokeOpacity="0.58"
+          />
+        </g>
+      )}
 
       <g fill="none" strokeLinecap="round">
         {[...rootYarnEdges, ...edges].map((e) => (
@@ -1568,6 +1624,7 @@ function useYarnPullGame() {
     recenterKey,
     reroll,
     restart,
+    seed,
     setDebugOpen,
     shake,
     stats,
@@ -1595,6 +1652,7 @@ export function ClassicYarnPullApp() {
     recenterKey,
     reroll,
     restart,
+    seed,
     setDebugOpen,
     shake,
     stats,
@@ -1694,13 +1752,12 @@ export function ClassicYarnPullApp() {
         }
         .yp-stuck-ring { animation: yp-stuck-ring 1300ms ease-in-out infinite; }
         @keyframes yp-node-tug {
-          0% { transform: translate(0, 0) scale(1); }
-          44% { transform: translate(var(--yp-tug-x), var(--yp-tug-y)) scale(0.985); }
-          70% { transform: translate(var(--yp-tug-back-x), var(--yp-tug-back-y)) scale(1.004); }
-          100% { transform: translate(0, 0) scale(1); }
+          0% { transform: translate(0, 0); }
+          52% { transform: translate(var(--yp-tug-x), var(--yp-tug-y)); }
+          100% { transform: translate(0, 0); }
         }
         .yp-node-tug {
-          animation: yp-node-tug 520ms cubic-bezier(0.22, 0.88, 0.28, 1);
+          animation: yp-node-tug 360ms ease-out;
           transform-box: fill-box;
           transform-origin: center;
         }
@@ -1724,7 +1781,7 @@ export function ClassicYarnPullApp() {
         .yp-shake { animation: yp-shake 360ms ease; }
         @keyframes yp-pop {
           0% { transform: scale(0.4); opacity: 0; }
-          60% { transform: scale(1.18); opacity: 1; }
+          60% { transform: scale(1); opacity: 1; }
           100% { transform: scale(1); opacity: 1; }
         }
         .yp-pop { animation: yp-pop 280ms ease-out; transform-origin: center; }
@@ -2213,13 +2270,12 @@ export function CozyYarnPullApp() {
         }
         .yp-stuck-ring { animation: yp-stuck-ring 1300ms ease-in-out infinite; }
         @keyframes yp-node-tug {
-          0% { transform: translate(0, 0) scale(1); }
-          44% { transform: translate(var(--yp-tug-x), var(--yp-tug-y)) scale(0.985); }
-          70% { transform: translate(var(--yp-tug-back-x), var(--yp-tug-back-y)) scale(1.004); }
-          100% { transform: translate(0, 0) scale(1); }
+          0% { transform: translate(0, 0); }
+          52% { transform: translate(var(--yp-tug-x), var(--yp-tug-y)); }
+          100% { transform: translate(0, 0); }
         }
         .yp-node-tug {
-          animation: yp-node-tug 520ms cubic-bezier(0.22, 0.88, 0.28, 1);
+          animation: yp-node-tug 360ms ease-out;
           transform-box: fill-box;
           transform-origin: center;
         }
@@ -2243,7 +2299,7 @@ export function CozyYarnPullApp() {
         .yp-shake { animation: yp-shake 360ms ease; }
         @keyframes yp-pop {
           0% { transform: scale(0.4); opacity: 0; }
-          60% { transform: scale(1.18); opacity: 1; }
+          60% { transform: scale(1); opacity: 1; }
           100% { transform: scale(1); opacity: 1; }
         }
         .yp-pop { animation: yp-pop 280ms ease-out; transform-origin: center; }
@@ -2945,16 +3001,19 @@ function CozyBasketCell({ basket, index }) {
                 boxShadow: filled
                   ? "inset 0 0 0 5px rgba(255, 255, 255, 0.32)"
                   : "inset 0 2px 4px rgba(54, 64, 70, 0.1)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxSizing: "border-box",
               }}
             >
               {filled && (
                 <div
                   className="yp-pop"
                   style={{
-                    width: 10,
-                    height: 10,
+                    width: 11,
+                    height: 11,
                     borderRadius: "50%",
-                    margin: 5,
                     background: "rgba(0, 80, 130, 0.18)",
                   }}
                 />
