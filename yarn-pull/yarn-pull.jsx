@@ -787,6 +787,60 @@ function sameDir(a, b) {
   return a.x === b.x && a.y === b.y;
 }
 
+function dirPriority(dir, preferredDirs) {
+  const index = preferredDirs.findIndex((preferred) => sameDir(preferred, dir));
+  return index === -1 ? preferredDirs.length : index;
+}
+
+function ribbonTurnStats(items) {
+  let turns = 0;
+  let longestRun = 1;
+  let currentRun = 1;
+  let previousDir = null;
+
+  for (let i = 1; i < items.length; i++) {
+    const dir = dirFromPoints(items[i - 1], items[i]);
+    if (previousDir && sameDir(previousDir, dir)) {
+      currentRun++;
+    } else {
+      if (previousDir) turns++;
+      currentRun = 1;
+      previousDir = dir;
+    }
+    longestRun = Math.max(longestRun, currentRun);
+  }
+
+  return { turns, longestRun };
+}
+
+function scoreSnakeRibbon(items, childDir, preferredDirs) {
+  const xs = items.map((item) => item.x);
+  const ys = items.map((item) => item.y);
+  const spanX = Math.max(...xs) - Math.min(...xs) + 1;
+  const spanY = Math.max(...ys) - Math.min(...ys) + 1;
+  const longSpan = Math.max(spanX, spanY);
+  const shortSpan = Math.min(spanX, spanY);
+  const area = spanX * spanY;
+  const density = items.length / area;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const endpointDistance = Math.abs(last.x - first.x) + Math.abs(last.y - first.y);
+  const { turns, longestRun } = ribbonTurnStats(items);
+  const thinPenalty = shortSpan === 1 ? 60 : shortSpan === 2 ? 20 : 0;
+
+  return (
+    longSpan * 4 +
+    Math.min(shortSpan, 5) * 18 -
+    Math.max(0, shortSpan - 6) * 10 +
+    turns * 7 +
+    endpointDistance * 0.6 -
+    longestRun * 1.2 -
+    density * 5 -
+    thinPenalty -
+    dirPriority(childDir, preferredDirs) * 0.25
+  );
+}
+
 function dirFromPoints(a, b, fallback = SNAKE_DIRS.east) {
   if (!a || !b) return fallback;
   const dx = Math.sign(b.x - a.x);
@@ -832,6 +886,7 @@ function replaySnakeRibbon(forest, clearedOrder) {
     const outgoing = next ? dirFromPoints(parent, next, incoming) : incoming;
     const parity = (nodeId + clearedSet.size) % 2;
     const preferredTurns = parity === 0 ? [turnRight(incoming), turnLeft(incoming)] : [turnLeft(incoming), turnRight(incoming)];
+    const preferredDirs = [outgoing, incoming, ...preferredTurns, reverseDir(incoming)];
     const children = node.children.filter((id) => !clearedSet.has(id));
     const before = ribbon.slice(0, index);
     const after = ribbon.slice(index + 1);
@@ -847,12 +902,9 @@ function replaySnakeRibbon(forest, clearedOrder) {
       continue;
     }
 
-    const candidates = [
-      ...preferredTurns,
-      incoming,
-      outgoing,
-      reverseDir(incoming),
-    ].filter((dir, dirIndex, dirs) => dirs.findIndex((other) => sameDir(other, dir)) === dirIndex);
+    const candidates = preferredDirs.filter(
+      (dir, dirIndex, dirs) => dirs.findIndex((other) => sameDir(other, dir)) === dirIndex
+    );
 
     let chosen = null;
     for (const childDir of candidates) {
@@ -884,10 +936,10 @@ function replaySnakeRibbon(forest, clearedOrder) {
         }
         occupied.add(key);
       }
-      if (!collides) {
-        chosen = { ribbon: proposed, childDir };
-        break;
-      }
+      if (collides) continue;
+
+      const score = scoreSnakeRibbon(proposed, childDir, preferredDirs);
+      if (!chosen || score > chosen.score) chosen = { ribbon: proposed, childDir, score };
     }
 
     if (!chosen) {
