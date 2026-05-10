@@ -8,7 +8,7 @@ function yarnMeta(color) {
   return YARN_COLOR_BY_HEX.get(color) || { hex: color, name: color, pattern: "solid", i: 0 };
 }
 
-function yarnPatternId(color) {
+export function yarnPatternId(color) {
   return `yarn-pattern-${yarnMeta(color).i}`;
 }
 
@@ -179,7 +179,7 @@ function stableUnit(seed) {
   return n - Math.floor(n);
 }
 
-function YarnSvgPatterns() {
+export function YarnSvgPatterns() {
   return (
     <>
       {YARN_COLORS.map((color, i) => {
