@@ -734,333 +734,15 @@ export function ClassicYarnPullApp() {
   );
 }
 
-export function CozyYarnPullApp() {
-  const {
-    changeDifficulty,
-    difficulty,
-    forest,
-    game,
-    history,
-    onTap,
-    playableIds,
-    pullEvent,
-    recenterKey,
-    reroll,
-    restart,
-    seed,
-    shake,
-    stuck,
-    tappableIds,
-    undo,
-    won,
-  } = useYarnPullGame();
-
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background:
-          "linear-gradient(180deg, #f5f3ef 0%, #f8f7f3 48%, #eef4ee 100%)",
-        fontFamily: FONT_BODY,
-        color: "#25313a",
-        padding: "14px",
-        boxSizing: "border-box",
-      }}
-    >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@500&display=swap');
-        .cozy-shell button {
-          font-family: ${FONT_BODY};
-        }
-        button.cozy-btn {
-          border: 1px solid rgba(61, 78, 91, 0.14);
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.92);
-          color: #25313a;
-          padding: 8px 12px;
-          font-size: 13px;
-          font-weight: 800;
-          cursor: pointer;
-          box-shadow: 0 5px 16px rgba(54, 64, 70, 0.09);
-          transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
-        }
-        button.cozy-btn:hover {
-          transform: translateY(-1px);
-          background: #ffffff;
-          box-shadow: 0 8px 20px rgba(54, 64, 70, 0.12);
-        }
-        button.cozy-btn.primary {
-          background: #e277ba;
-          color: white;
-          border-color: #d75faa;
-        }
-        button.cozy-btn:disabled,
-        button.cozy-btn:disabled:hover {
-          opacity: 0.42;
-          transform: none;
-          cursor: default;
-          box-shadow: none;
-        }
-        button.cozy-seg {
-          border: 0;
-          background: transparent;
-          color: #52606a;
-          border-radius: 999px;
-          padding: 6px 10px;
-          font-size: 12px;
-          font-weight: 800;
-          cursor: pointer;
-        }
-        button.cozy-seg.active {
-          background: #4bb7c9;
-          color: white;
-          box-shadow: inset 0 -2px 0 rgba(0, 98, 116, 0.16);
-        }
-        @keyframes yp-pulse {
-          0%, 100% { r: 19; opacity: 0.55; }
-          50% { r: 23; opacity: 0.15; }
-        }
-        .yp-pulse { animation: yp-pulse 1800ms ease-in-out infinite; }
-        @keyframes yp-stuck-ring {
-          0%, 100% { r: 29; opacity: 0.38; }
-          50% { r: 33; opacity: 0.16; }
-        }
-        .yp-stuck-ring { animation: yp-stuck-ring 1300ms ease-in-out infinite; }
-        @keyframes yp-node-tug {
-          0% { transform: translate(0, 0); }
-          52% { transform: translate(var(--yp-tug-x), var(--yp-tug-y)); }
-          100% { transform: translate(0, 0); }
-        }
-        .yp-node-tug {
-          animation: yp-node-tug 360ms ease-out;
-          transform-box: fill-box;
-          transform-origin: center;
-        }
-        @keyframes yp-pile-enter {
-          0% { opacity: 1; }
-          70% { opacity: 0.86; }
-          100% { opacity: 1; }
-        }
-        .yp-pile-enter {
-          animation: yp-pile-enter 560ms ease-out forwards;
-          transform-box: fill-box;
-          transform-origin: center;
-        }
-        @keyframes yp-shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-6px); }
-          40% { transform: translateX(6px); }
-          60% { transform: translateX(-3px); }
-          80% { transform: translateX(3px); }
-        }
-        .yp-shake { animation: yp-shake 360ms ease; }
-        @keyframes yp-pop {
-          0% { transform: scale(0.4); opacity: 0; }
-          60% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        .yp-pop { animation: yp-pop 280ms ease-out; transform-origin: center; }
-        .cozy-layout {
-          max-width: 1240px;
-          margin: 0 auto;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-        .cozy-topbar {
-          min-height: 42px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 7px 9px 7px 14px;
-          border-radius: 22px;
-          background: rgba(255, 255, 255, 0.82);
-          border: 1px solid rgba(61, 78, 91, 0.12);
-          box-shadow: 0 8px 24px rgba(54, 64, 70, 0.08);
-        }
-        .cozy-title {
-          font-size: 20px;
-          font-weight: 900;
-          letter-spacing: 0;
-          white-space: nowrap;
-        }
-        .cozy-actions {
-          display: flex;
-          gap: 7px;
-          margin-left: auto;
-        }
-        .cozy-tray {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          padding: 9px 10px;
-          border-radius: 18px;
-          background: rgba(255, 255, 255, 0.8);
-          border: 1px solid rgba(61, 78, 91, 0.12);
-          box-shadow: 0 8px 24px rgba(54, 64, 70, 0.07);
-        }
-        @media (max-width: 820px) {
-          .cozy-topbar { flex-wrap: wrap; }
-          .cozy-actions { margin-left: 0; }
-          .cozy-tray { align-items: flex-start; flex-direction: column; }
-        }
-      `}</style>
-
-      <main className="cozy-shell cozy-layout">
-        <header className="cozy-topbar">
-          <div className="cozy-title">Untangle</div>
-          <div
-            aria-label="Difficulty"
-            style={{
-              display: "flex",
-              gap: 4,
-              padding: 3,
-              borderRadius: 999,
-              background: "rgba(244, 244, 239, 0.92)",
-              border: "1px solid rgba(61, 78, 91, 0.1)",
-            }}
-          >
-            {DIFFICULTIES.map((option) => (
-              <button
-                key={option.id}
-                className={`cozy-seg${difficulty === option.id ? " active" : ""}`}
-                onClick={() => changeDifficulty(option.id)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="cozy-actions">
-            <button className="cozy-btn" onClick={restart}>
-              Restart
-            </button>
-            <button className="cozy-btn primary" onClick={reroll}>
-              New puzzle
-            </button>
-          </div>
-        </header>
-
-        <section
-          style={{
-            minWidth: 0,
-            borderRadius: 20,
-            background: "#f7f5ef",
-            border: "1px solid rgba(61, 78, 91, 0.12)",
-            boxShadow: "0 18px 44px rgba(54, 64, 70, 0.1)",
-            overflow: "hidden",
-            position: "relative",
-          }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              top: 12,
-              left: 12,
-              zIndex: 2,
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-            }}
-          >
-            <button
-              className="cozy-btn"
-              onClick={undo}
-              disabled={history.length === 0}
-              title="Undo last move"
-              style={{ padding: "8px 12px", background: "rgba(255, 255, 255, 0.92)" }}
-            >
-              Undo
-            </button>
-          </div>
-
-          {stuck && (
-            <div
-              role="status"
-              aria-live="polite"
-              style={{
-                position: "absolute",
-                top: 58,
-                left: "50%",
-                transform: "translateX(-50%)",
-                zIndex: 2,
-                borderRadius: 8,
-                background: "rgba(255, 255, 255, 0.94)",
-                border: "1px solid rgba(61, 78, 91, 0.13)",
-                boxShadow: "0 10px 26px rgba(54, 64, 70, 0.12)",
-                padding: "10px 14px",
-                maxWidth: "min(360px, calc(100% - 32px))",
-                textAlign: "center",
-                fontWeight: 700,
-              }}
-            >
-              No open basket or spool can take these threads.
-            </div>
-          )}
-
-          <ForestViewport
-            focusKey={`cozy-${difficulty}-${seed}-${recenterKey}`}
-            variant="cozy"
-          >
-            <ForestSVG
-              forest={forest}
-              visibleIds={game.visible}
-              clearedIds={game.cleared}
-              tappableIds={tappableIds}
-              playableIds={playableIds}
-              stuck={stuck}
-              pullEvent={pullEvent}
-              clearedOrder={game.clearedOrder}
-              onTap={onTap}
-              variant="cozy"
-            />
-          </ForestViewport>
-
-          {won && (
-            <div
-              style={{
-                position: "absolute",
-                right: 14,
-                bottom: 14,
-                zIndex: 2,
-                display: "flex",
-                gap: 10,
-                alignItems: "center",
-                borderRadius: 8,
-                background: "rgba(255, 255, 255, 0.94)",
-                border: "1px solid rgba(61, 78, 91, 0.13)",
-                padding: "10px 12px",
-                boxShadow: "0 10px 26px rgba(54, 64, 70, 0.12)",
-              }}
-            >
-              <span style={{ fontSize: 16, fontWeight: 900 }}>All tucked away.</span>
-              <button className="cozy-btn primary" onClick={reroll}>
-                Another
-              </button>
-            </div>
-          )}
-        </section>
-
-        <section className="cozy-tray">
-          <CozyBasketsRow active={game.active} shakeKey={shake} />
-          <CozySpoolsRow spools={game.spools} />
-        </section>
-      </main>
-    </div>
-  );
-}
-
-export default function App() {
-  return <CozyYarnPullApp />;
+export default function YarnPullApp() {
+  return <ClassicYarnPullApp />;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // SUB-COMPONENTS
 // ────────────────────────────────────────────────────────────────────────────
 
-function ForestViewport({ children, focusKey, variant = "classic" }) {
-  const cozy = variant === "cozy";
+function ForestViewport({ children, focusKey }) {
   const DEFAULT_ZOOM = 0.35;
   const ref = useRef(null);
   const contentRef = useRef(null);
@@ -1170,30 +852,6 @@ function ForestViewport({ children, focusKey, variant = "classic" }) {
     [updateZoom, zoom]
   );
 
-  if (cozy) {
-    return (
-      <div
-        style={{
-          height: "clamp(340px, 54vh, 600px)",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          touchAction: "manipulation",
-          userSelect: "none",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-          }}
-        >
-          {children}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ position: "relative" }}>
       <div
@@ -1205,7 +863,7 @@ function ForestViewport({ children, focusKey, variant = "classic" }) {
         onClickCapture={onClickCapture}
         onWheel={onWheel}
         style={{
-          height: cozy ? "clamp(340px, 54vh, 600px)" : "clamp(360px, 58vh, 640px)",
+          height: "clamp(360px, 58vh, 640px)",
           overflow: needsScroll ? "auto" : "hidden",
           overscrollBehavior: "contain",
           WebkitOverflowScrolling: "touch",
@@ -1233,25 +891,24 @@ function ForestViewport({ children, focusKey, variant = "classic" }) {
           display: "flex",
           gap: 4,
           padding: 4,
-          background: cozy ? "rgba(255, 255, 255, 0.9)" : "rgba(251, 243, 223, 0.86)",
-          border: cozy ? "1px solid rgba(34, 102, 143, 0.18)" : "1.5px solid #2a1d10",
-          borderRadius: cozy ? 999 : 0,
-          boxShadow: cozy ? "0 6px 18px rgba(24, 91, 135, 0.13)" : "2px 2px 0 rgba(42, 29, 16, 0.24)",
+          background: "rgba(251, 243, 223, 0.86)",
+          border: "1.5px solid #2a1d10",
+          boxShadow: "2px 2px 0 rgba(42, 29, 16, 0.24)",
         }}
       >
         <button
-          className={cozy ? "cozy-map" : "ypmapbtn"}
+          className="ypmapbtn"
           disabled={!canZoomOut}
           onClick={() => updateZoom(zoom - 0.12)}
           title="Zoom out"
         >
           -
         </button>
-        <button className={cozy ? "cozy-map" : "ypmapbtn"} onClick={recenter} title="Recenter">
+        <button className="ypmapbtn" onClick={recenter} title="Recenter">
           ⊙
         </button>
         <button
-          className={cozy ? "cozy-map" : "ypmapbtn"}
+          className="ypmapbtn"
           disabled={!canZoomIn}
           onClick={() => updateZoom(zoom + 0.12)}
           title="Zoom toward default"
@@ -1492,125 +1149,6 @@ function SpoolsRow({ spools }) {
             />
           )}
         </div>
-      ))}
-    </section>
-  );
-}
-
-function CozyBasketsRow({ active, shakeKey }) {
-  return (
-    <section
-      key={`cozy-shake-${shakeKey}`}
-      className={shakeKey > 0 ? "yp-shake" : ""}
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 8,
-        alignItems: "center",
-      }}
-    >
-      {active.map((basket, i) => (
-        <CozyBasketCell
-          key={`cozy-slot-${i}-${basket ? basket.color + "-" + basket.slots.length : "empty"}`}
-          basket={basket}
-          index={i}
-        />
-      ))}
-    </section>
-  );
-}
-
-function CozyBasketCell({ basket, index }) {
-  return (
-    <div
-      title={basket ? yarnTitle(basket.color) : `empty basket ${index + 1}`}
-      style={{
-        width: 112,
-        minWidth: 112,
-        height: 54,
-        borderRadius: 14,
-        border: `3px solid ${basket ? basket.color : "rgba(126, 168, 194, 0.45)"}`,
-        background: "linear-gradient(180deg, #ffffff 0%, #eef9ff 100%)",
-        boxShadow: basket
-          ? `0 7px 16px rgba(54, 64, 70, 0.1), inset 0 -4px 0 ${basket.color}22`
-          : "inset 0 -4px 0 rgba(126, 168, 194, 0.12)",
-        opacity: basket ? 1 : 0.68,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxSizing: "border-box",
-      }}
-    >
-      <div style={{ display: "flex", gap: 8 }}>
-        {[0, 1, 2].map((s) => {
-          const filled = basket?.slots[s] !== undefined;
-          return (
-            <div
-              key={s}
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: "50%",
-                border: `2px solid ${basket ? basket.color : "rgba(126, 168, 194, 0.5)"}`,
-                background: filled
-                  ? `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.38), transparent 34%), ${basket.color}`
-                  : "linear-gradient(180deg, #e2f5ff 0%, #f9fdff 100%)",
-                boxShadow: filled
-                  ? "inset 0 0 0 5px rgba(255, 255, 255, 0.32)"
-                  : "inset 0 2px 4px rgba(54, 64, 70, 0.1)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxSizing: "border-box",
-              }}
-            >
-              {filled && (
-                <div
-                  className="yp-pop"
-                  style={{
-                    width: 11,
-                    height: 11,
-                    borderRadius: "50%",
-                    background: "rgba(0, 80, 130, 0.18)",
-                  }}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function CozySpoolsRow({ spools }) {
-  return (
-    <section
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 7,
-        alignItems: "center",
-        justifyContent: "flex-end",
-      }}
-    >
-      {spools.map((color, i) => (
-        <div
-          key={i}
-          title={color ? yarnTitle(color) : `empty spool ${i + 1}`}
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: "50%",
-            border: "2px solid rgba(84, 139, 172, 0.45)",
-            background: color
-              ? `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.36), transparent 32%), ${color}`
-              : "linear-gradient(180deg, #e2f5ff 0%, #ffffff 100%)",
-            boxShadow: color
-              ? "inset 0 0 0 7px rgba(255, 255, 255, 0.34), 0 4px 10px rgba(54, 64, 70, 0.1)"
-              : "inset 0 2px 4px rgba(54, 64, 70, 0.1)",
-          }}
-        />
       ))}
     </section>
   );

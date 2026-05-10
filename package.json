@@ -2,11 +2,9 @@
   "name": "fun-games",
   "private": true,
   "scripts": {
-    "build:yarn-pull": "esbuild yarn-pull/main.jsx --bundle --format=esm --jsx=automatic --define:__YARN_PULL_UI__='\"cozy\"' --outfile=yarn-pull/dist/app.js",
-    "build:yarn-pull:classic": "esbuild yarn-pull/main.jsx --bundle --format=esm --jsx=automatic --define:__YARN_PULL_UI__='\"classic\"' --outfile=yarn-pull/dist/app.js",
+    "build:yarn-pull": "esbuild yarn-pull/main.jsx --bundle --format=esm --jsx=automatic --outfile=yarn-pull/dist/app.js",
     "serve:yarn-pull": "python3 -m http.server 4173 -d yarn-pull",
-    "start:yarn-pull": "npm run build:yarn-pull && npm run serve:yarn-pull",
-    "start:yarn-pull:classic": "npm run build:yarn-pull:classic && npm run serve:yarn-pull"
+    "start:yarn-pull": "npm run build:yarn-pull && npm run serve:yarn-pull"
   },
   "dependencies": {
     "react": "^19.2.5",

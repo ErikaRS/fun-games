@@ -220,14 +220,12 @@ export function ForestSVG({
   stuck,
   pullEvent,
   clearedOrder,
-  variant = "classic",
 }) {
-  const cozy = variant === "cozy";
   const PAD = 76;
   const ROOT_RADIUS = 26;
   const RADIAL_GAP = 68;
   const MIN_NODE_ARC = 60;
-  const NODE_R = cozy ? 22 : 24;
+  const NODE_R = 24;
   const HOLD_PREVIEW_MS = 240;
   const holdRef = useRef(null);
   const [previewNodeId, setPreviewNodeId] = useState(null);
@@ -697,9 +695,9 @@ export function ForestSVG({
           {!cleared && !previewChild && (
             <circle
               r={NODE_R + 2}
-              fill={cozy ? "#6d5438" : "#3b2a1a"}
-              opacity={cozy ? "0.16" : "0.2"}
-              filter={cozy ? "url(#cozy-shadow)" : "url(#paper-shadow)"}
+              fill="#3b2a1a"
+              opacity="0.2"
+              filter="url(#paper-shadow)"
               transform="translate(1, 2)"
             />
           )}
@@ -743,60 +741,18 @@ export function ForestSVG({
               opacity="0.88"
             />
           )}
-          {cozy ? (
-            <>
-              <clipPath id={`cozy-node-clip-${n.id}`}>
-                <circle r={NODE_R - 1} />
-              </clipPath>
-              <circle
-                r={NODE_R}
-                fill="#f8ecd3"
-                stroke={piled ? "#f8ecd3" : previewChild ? "#8b7358" : "#7b6042"}
-                strokeWidth={piled ? "2.2" : previewChild ? "1.4" : "1.6"}
-              />
-              <g clipPath={`url(#cozy-node-clip-${n.id})`}>
-                <circle r={NODE_R - 1} fill={n.color || "#dba66a"} opacity={piled ? 0.64 : 1} />
-                <circle r={NODE_R + 7} cx="-8" cy="-9" fill="#fff6e3" opacity="0.18" />
-                <circle r={NODE_R + 10} cx="10" cy="12" fill="#3d2a18" opacity="0.12" />
-                {[-18, -9, 0, 9, 18].map((y, i) => (
-                  <path
-                    key={`strand-a-${i}`}
-                    d={`M ${-NODE_R - 5} ${y} C ${-8} ${y - 10}, ${8} ${y + 10}, ${NODE_R + 5} ${y}`}
-                    fill="none"
-                    stroke="#fff7df"
-                    strokeWidth="2.4"
-                    strokeOpacity={piled ? "0.2" : "0.32"}
-                  />
-                ))}
-                {[-16, -5, 6, 17].map((x, i) => (
-                  <path
-                    key={`strand-b-${i}`}
-                    d={`M ${x} ${-NODE_R - 5} C ${x + 12} ${-8}, ${x - 12} ${8}, ${x} ${NODE_R + 5}`}
-                    fill="none"
-                    stroke="#442d1a"
-                    strokeWidth="1.7"
-                    strokeOpacity={piled ? "0.08" : "0.14"}
-                  />
-                ))}
-              </g>
-              <circle r={NODE_R - 0.5} fill="none" stroke="#fff8e6" strokeOpacity="0.62" />
-            </>
-          ) : (
-            <>
-              <circle
-                r={NODE_R}
-                fill={n.color || "#dba66a"}
-                stroke={piled ? "#fbf3df" : previewChild ? "#2a1d10" : "#3b2a1a"}
-                strokeWidth={piled ? "2.8" : previewChild ? "1.6" : "2"}
-              />
-              <circle
-                r={NODE_R - 2}
-                fill={`url(#${yarnPatternId(n.color)})`}
-                opacity={piled ? "0.42" : "1"}
-              />
-              {piled && <circle r={NODE_R - 3} fill="#fbf3df" opacity="0.32" />}
-            </>
-          )}
+          <circle
+            r={NODE_R}
+            fill={n.color || "#dba66a"}
+            stroke={piled ? "#fbf3df" : previewChild ? "#2a1d10" : "#3b2a1a"}
+            strokeWidth={piled ? "2.8" : previewChild ? "1.6" : "2"}
+          />
+          <circle
+            r={NODE_R - 2}
+            fill={`url(#${yarnPatternId(n.color)})`}
+            opacity={piled ? "0.42" : "1"}
+          />
+          {piled && <circle r={NODE_R - 3} fill="#fbf3df" opacity="0.32" />}
           {tappable && <circle r={NODE_R + 18} fill="transparent" />}
         </g>
       </g>
@@ -818,64 +774,26 @@ export function ForestSVG({
         <filter id="paper-shadow" x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="1.2" />
         </filter>
-        <filter id="cozy-shadow" x="-35%" y="-35%" width="170%" height="170%">
-          <feDropShadow dx="0" dy="2" stdDeviation="2.2" floodColor="#47525a" floodOpacity="0.16" />
-        </filter>
         <pattern id="grain" width="3" height="3" patternUnits="userSpaceOnUse">
           <rect width="3" height="3" fill="transparent" />
           <circle cx="1" cy="1" r="0.3" fill="#3b2a1a" opacity="0.06" />
         </pattern>
-        <pattern id="cozy-fabric" width="12" height="12" patternUnits="userSpaceOnUse">
-          <rect width="12" height="12" fill="#f7f5ef" />
-        </pattern>
         <YarnSvgPatterns />
       </defs>
 
-      <rect x="0" y="0" width={width} height={height} fill={cozy ? "url(#cozy-fabric)" : "url(#grain)"} />
-
-      {!showAll && pileOrder.size > 0 && cozy && (
-        <g pointerEvents="none">
-          <circle
-            cx={offsetX}
-            cy={offsetY + 15}
-            r={Math.min(60, 34 + Math.sqrt(pileOrder.size) * 4.8)}
-            fill="#dff4f8"
-            fillOpacity="0.22"
-            stroke="#54a7ba"
-            strokeWidth="2.6"
-            strokeOpacity="0.58"
-          />
-        </g>
-      )}
+      <rect x="0" y="0" width={width} height={height} fill="url(#grain)" />
 
       <g fill="none" strokeLinecap="round">
         {[...rootYarnEdges, ...edges].map((e) => (
           <g key={e.key}>
             <path
               d={edgePath(e)}
-              stroke={cozy ? "#2a7fb0" : "#2a1d10"}
-              strokeWidth={e.preview ? "1.4" : cozy ? "8.2" : "9.6"}
-              strokeDasharray={e.preview ? (cozy ? "3 7" : "4 6") : undefined}
-              strokeOpacity={e.preview ? 0.18 : e.cleared ? 0.07 : cozy ? 0.16 : 0.18}
+              stroke="#2a1d10"
+              strokeWidth={e.preview ? "1.4" : "9.6"}
+              strokeDasharray={e.preview ? "4 6" : undefined}
+              strokeOpacity={e.preview ? 0.18 : e.cleared ? 0.07 : 0.18}
             />
-            {!e.preview && cozy && (
-              <>
-                <path
-                  d={edgePath(e)}
-                  stroke={e.childColor || e.parentColor || "#7a5a3a"}
-                  strokeWidth={e.fakeRoot ? "5.2" : "5.6"}
-                  strokeOpacity={e.cleared ? 0.34 : 0.82}
-                />
-                <path
-                  d={edgePath(e)}
-                  stroke="#fff7df"
-                  strokeWidth="1.6"
-                  strokeOpacity={e.cleared ? 0.14 : 0.34}
-                  strokeDasharray="1 9"
-                />
-              </>
-            )}
-            {!e.preview && !cozy && (
+            {!e.preview && (
               <>
                 <path
                   d={edgePath(e)}
