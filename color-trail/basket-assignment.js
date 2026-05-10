@@ -1,5 +1,5 @@
 import {
-  NUM_SPOOLS,
+  NUM_RESERVES,
   applyTapWithOptions,
   buildInitialGameStateFromActivationOrder,
   getTappableNodeIds,
@@ -25,10 +25,10 @@ import {
 //    three nodes colored during that loop, and all three share one color.
 // 3. Optionally perturb the otherwise-safe basket activation order. A candidate
 //    perturbation is accepted only if a witness solver can still finish with
-//    spools, and a zero-spool search cannot finish. That gives the puzzle some
+//    reserves, and a zero-reserve search cannot finish. That gives the puzzle some
 //    pressure without abandoning solvability-by-construction.
 
-export const YARN_COLORS = [
+export const TILE_COLORS = [
   { hex: "#36b7c9", name: "aqua", pattern: "cross" },
   { hex: "#ffe055", name: "sunshine", pattern: "vertical" },
   { hex: "#b9dc4a", name: "lime", pattern: "horizontal" },
@@ -41,7 +41,7 @@ export const YARN_COLORS = [
   { hex: "#ffd0a6", name: "papaya cream", pattern: "wide-back" },
 ];
 
-export const PALETTE = YARN_COLORS.map((color) => color.hex);
+export const PALETTE = TILE_COLORS.map((color) => color.hex);
 
 function cloneForestForBasketAssignment(forest) {
   return {
@@ -98,10 +98,10 @@ export function assignBasketsToForest(forest, rng) {
 export const colorForestAndMakeBaskets = assignBasketsToForest;
 
 // Simulation helpers use the same reducer as real gameplay. They differ only
-// in activation order and spool capacity, which lets generation prove facts
+// in activation order and reserve capacity, which lets generation prove facts
 // about a candidate puzzle without maintaining a parallel rules engine.
-function makeStateForSimulation(forest, activationOrder, spoolCapacity) {
-  const routed = buildInitialGameStateFromActivationOrder(activationOrder, spoolCapacity);
+function makeStateForSimulation(forest, activationOrder, reserveCapacity) {
+  const routed = buildInitialGameStateFromActivationOrder(activationOrder, reserveCapacity);
   return {
     ...routed,
     visible: new Set(forest.rootIds),
@@ -121,15 +121,15 @@ export function makeSafePreferenceOrder(baskets) {
   return order;
 }
 
-export function solveWithPreferredOrder(forest, activationOrder, preferredNodeOrder, spoolCapacity) {
+export function solveWithPreferredOrder(forest, activationOrder, preferredNodeOrder, reserveCapacity) {
   // Greedy witness solver: repeatedly scan currently tappable nodes in a known
   // safe preference order and take the first legal move. This is not a player
   // hint system; it is a deterministic certificate used while generating.
   const rank = new Map(preferredNodeOrder.map((id, i) => [id, i]));
-  let state = makeStateForSimulation(forest, activationOrder, spoolCapacity);
+  let state = makeStateForSimulation(forest, activationOrder, reserveCapacity);
   const trace = [];
-  let spoolPlacements = 0;
-  let peakSpoolOccupancy = 0;
+  let reservePlacements = 0;
+  let peakReserveOccupancy = 0;
 
   while (state.cleared.size < forest.nodes.length) {
     const tappable = getTappableNodeIds(state).sort(
@@ -137,26 +137,26 @@ export function solveWithPreferredOrder(forest, activationOrder, preferredNodeOr
     );
     let chosen = null;
     for (const id of tappable) {
-      const result = applyTapWithOptions(state, forest, id, { spoolCapacity });
+      const result = applyTapWithOptions(state, forest, id, { reserveCapacity });
       if (result.ok) {
         chosen = { id, result };
         break;
       }
     }
     if (!chosen) {
-      return { ok: false, trace, spoolPlacements, peakSpoolOccupancy };
+      return { ok: false, trace, reservePlacements, peakReserveOccupancy };
     }
 
     state = chosen.result.state;
-    if (chosen.result.wentToSpool) spoolPlacements++;
-    peakSpoolOccupancy = Math.max(
-      peakSpoolOccupancy,
-      state.spools.filter((s) => s !== null).length
+    if (chosen.result.wentToReserve) reservePlacements++;
+    peakReserveOccupancy = Math.max(
+      peakReserveOccupancy,
+      state.reserves.filter((s) => s !== null).length
     );
     trace.push(chosen.id);
   }
 
-  return { ok: true, trace, spoolPlacements, peakSpoolOccupancy };
+  return { ok: true, trace, reservePlacements, peakReserveOccupancy };
 }
 
 function moveBasket(order, fromIdx, toIdx) {
@@ -166,7 +166,7 @@ function moveBasket(order, fromIdx, toIdx) {
   return next;
 }
 
-function encodeZeroSpoolState(state) {
+function encodeZeroReserveState(state) {
   const visible = [...state.visible].sort((a, b) => a - b).join(",");
   const cleared = [...state.cleared].sort((a, b) => a - b).join(",");
   const active = state.active
@@ -176,9 +176,9 @@ function encodeZeroSpoolState(state) {
   return `${visible}|${cleared}|${active}|${queue}`;
 }
 
-function hasZeroSpoolSolution(forest, activationOrder, maxStates = 4000) {
-  // DFS over the game state with spoolCapacity = 0. `true` means the candidate
-  // is too easy because it can be solved without spools. `false` means spools
+function hasZeroReserveSolution(forest, activationOrder, maxStates = 4000) {
+  // DFS over the game state with reserveCapacity = 0. `true` means the candidate
+  // is too easy because it can be solved without reserves. `false` means reserves
   // are required. `null` means the search budget ran out, so generation rejects
   // the candidate rather than trusting an incomplete proof.
   const seen = new Set();
@@ -188,7 +188,7 @@ function hasZeroSpoolSolution(forest, activationOrder, maxStates = 4000) {
     if (state.cleared.size === forest.nodes.length) return true;
     if (searched++ > maxStates) return null;
 
-    const key = encodeZeroSpoolState(state);
+    const key = encodeZeroReserveState(state);
     if (seen.has(key)) return false;
     seen.add(key);
 
@@ -198,7 +198,7 @@ function hasZeroSpoolSolution(forest, activationOrder, maxStates = 4000) {
       .sort((a, b) => forest.nodes[b].depth - forest.nodes[a].depth);
 
     for (const nodeId of tappable) {
-      const result = applyTapWithOptions(state, forest, nodeId, { spoolCapacity: 0 });
+      const result = applyTapWithOptions(state, forest, nodeId, { reserveCapacity: 0 });
       if (!result.ok) continue;
       const child = dfs(result.state);
       if (child === true) return true;
@@ -244,14 +244,14 @@ function makePressureCandidateEvents(forest, trace, rng, opts = {}) {
   return [...preferred, ...rest].slice(0, candidateLimit);
 }
 
-export function addSpoolPressure(forest, baskets, rng, opts = {}) {
+export function addReservePressure(forest, baskets, rng, opts = {}) {
   // Start from the safe activation order, then try moving one basket later in
   // that order. A move is accepted only when the normal solver can complete
-  // with the configured spools and the zero-spool solver cannot complete.
-  const spoolCapacity = opts.spoolCapacity ?? NUM_SPOOLS;
+  // with the configured reserves and the zero-reserve solver cannot complete.
+  const reserveCapacity = opts.reserveCapacity ?? NUM_RESERVES;
   const maxLag = opts.maxLag ?? 8;
-  const forcedSpoolChance = opts.forcedSpoolChance ?? 1;
-  if (rng() > forcedSpoolChance) {
+  const forcedReserveChance = opts.forcedReserveChance ?? 1;
+  if (rng() > forcedReserveChance) {
     return { baskets, metrics: { pressured: false, reason: "pressure-skipped" } };
   }
 
@@ -266,7 +266,7 @@ export function addSpoolPressure(forest, baskets, rng, opts = {}) {
   let checkedCandidates = 0;
   const candidateBudget =
     opts.candidateBudget ?? (forest.nodes.length > 90 ? 36 : forest.nodes.length > 60 ? 72 : 120);
-  const zeroSpoolStateBudget =
+  const zeroReserveStateBudget =
     forest.nodes.length > 90 ? 300 : forest.nodes.length > 60 ? 1200 : 4000;
 
   for (const nodeId of candidateEvents) {
@@ -291,22 +291,22 @@ export function addSpoolPressure(forest, baskets, rng, opts = {}) {
         forest,
         candidateOrder,
         safePreference,
-        spoolCapacity
+        reserveCapacity
       );
       if (!witness.ok) continue;
 
-      const zeroSpool = hasZeroSpoolSolution(forest, candidateOrder, zeroSpoolStateBudget);
-      if (zeroSpool !== false) continue;
+      const zeroReserve = hasZeroReserveSolution(forest, candidateOrder, zeroReserveStateBudget);
+      if (zeroReserve !== false) continue;
 
       return {
         baskets: candidateOrder.slice().reverse(),
         metrics: {
           pressured: true,
-          forcedSpool: true,
+          forcedReserve: true,
           delayMoves: 1,
-          spoolPlacements: witness.spoolPlacements,
-          peakSpoolOccupancy: witness.peakSpoolOccupancy,
-          zeroSpoolRejected: true,
+          reservePlacements: witness.reservePlacements,
+          peakReserveOccupancy: witness.peakReserveOccupancy,
+          zeroReserveRejected: true,
         },
       };
     }

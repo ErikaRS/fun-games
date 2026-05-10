@@ -1,4 +1,4 @@
-// Forest generation is intentionally UI-free so other yarn-pull variants can reuse it.
+// Forest generation is intentionally UI-free so other color-trail variants can reuse it.
 //
 // High-level algorithm:
 // 1. Use a seeded RNG so a puzzle seed always rebuilds the same forest.

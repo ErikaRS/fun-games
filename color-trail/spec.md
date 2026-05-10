@@ -1,4 +1,4 @@
-# Yarn Pull — Game Specification
+# Color Trail — Game Specification
 
 ## Concept
 A puzzle game where the player sorts colored nodes from a hidden forest structure into color-matched baskets. The forest is revealed top-down as nodes are cleared. The puzzle is procedurally generated and guaranteed solvable by construction.
@@ -21,10 +21,10 @@ Roots are initially visible. A node becomes **available** (tappable) when its pa
 - When a basket fills, it is replaced in-place by the next queued basket
 - There are **N total baskets** in a puzzle (configurable)
 
-### Spools
-- **5 holding spools**, each can hold one node's color
-- A spool is filled when a tapped node has no matching active basket
-- After every state change, **auto-flush** runs: any spool whose color matches an active basket empties into that basket
+### Reserves
+- **5 holding reserves**, each can hold one node's color
+- A reserve is filled when a tapped node has no matching active basket
+- After every state change, **auto-flush** runs: any reserve whose color matches an active basket empties into that basket
 - Auto-flush repeats until stable, since flushing can fill a basket, advance the queue, and unlock further flushes
 
 ---
@@ -35,15 +35,15 @@ Roots are initially visible. A node becomes **available** (tappable) when its pa
 1. Player taps an available node
 2. Node's color is routed:
    - If an active basket matches and has space → place in basket
-   - Else if any spool is empty → place in the first empty spool
+   - Else if any reserve is empty → place in the first empty reserve
    - Else → **tap is blocked** (this is the loss state, see below)
 3. Node's children become available (revealed)
 4. Node is marked cleared
 5. If a basket was filled by step 2 → replace in-place with next queued basket
-6. Auto-flush spools (repeat until stable)
+6. Auto-flush reserves (repeat until stable)
 
 ### Loss condition
-A tap is attempted on a node whose color matches no active basket AND all 5 spools are occupied. Equivalently: every available node's color matches no active basket, and all spools are full.
+A tap is attempted on a node whose color matches no active basket AND all 5 reserves are occupied. Equivalently: every available node's color matches no active basket, and all reserves are full.
 
 ### Win condition
 All nodes cleared. By construction, the nodes exactly fill all baskets, so this coincides with all baskets being completed.
@@ -93,20 +93,20 @@ The basket creation order from Step 2 goes leaves-first, roots-last. The last ba
 
 **Approach:** reverse the creation order. Roots were colored last, so their baskets activate first. Leaves were colored first, so their baskets activate last. This guarantees that whenever a basket is active, nodes of that color are either already visible or will be revealed by clearing their parents, which are themselves already active or completed.
 
-This reversal alone is sufficient in combination with spools — the spools absorb timing mismatches between when a node is revealed and when its corresponding basket is active.
+This reversal alone is sufficient in combination with reserves — the reserves absorb timing mismatches between when a node is revealed and when its corresponding basket is active.
 
-### Step 4 — Add certified spool pressure
-The reversed activation order is treated as a safe baseline. To keep puzzles from being trivially zero-spool, generation searches for a small basket delay that introduces controlled timing mismatch.
+### Step 4 — Add certified reserve pressure
+The reversed activation order is treated as a safe baseline. To keep puzzles from being trivially zero-reserve, generation searches for a small basket delay that introduces controlled timing mismatch.
 
 **Algorithm:**
 1. Record the 3 node IDs assigned to each basket during coloring
 2. Build the safe reversed activation order
-3. Solve the safe order with zero spools to produce a legal tap trace
+3. Solve the safe order with zero reserves to produce a legal tap trace
 4. Pick candidate non-root tap events from that trace
 5. Delay the tapped node's basket by a small lag in the activation order
-6. Replay the same tap trace with normal spools
+6. Replay the same tap trace with normal reserves
 7. Accept the delayed order only if replay succeeds and lands in the target pressure band
-8. Run a zero-spool solver against the delayed order and reject it if any zero-spool solution still exists
+8. Run a zero-reserve solver against the delayed order and reject it if any zero-reserve solution still exists
 
 The accepted puzzle therefore has a witness solution and a measured pressure profile. If no order can be certified within the generation budget, the generator falls back to the safe reversed order.
 
@@ -119,9 +119,9 @@ The accepted puzzle therefore has a witness solution and a measured pressure pro
 | Total baskets | 9–99 (configurable) |
 | Active baskets | Always 3 |
 | Basket slots | 3 nodes each |
-| Holding spools | 5 |
-| Target spool placements | 1–3 for the certified solve |
-| Target peak spool occupancy | At most 3 for the certified solve |
+| Holding reserves | 5 |
+| Target reserve placements | 1–3 for the certified solve |
+| Target peak reserve occupancy | At most 3 for the certified solve |
 | Root count | 2–4 |
 | Child count probabilities | 0: 1%, 1: 49%, 2: 25%, 3: 15%, 4: 10% |
 | Color palette | Any size; colors assigned freely with no coverage requirements |
@@ -129,4 +129,4 @@ The accepted puzzle therefore has a witness solution and a measured pressure pro
 ---
 
 ## Solvability vs. winnability
-The puzzle is **solvable by construction** — there exists a sequence of taps that wins. However, the player can still lose by filling all spools with mismatched colors before the corresponding baskets activate. Strategic play means choosing which available node to tap when multiple are matchable, and being judicious about committing colors to spools when no basket matches.
+The puzzle is **solvable by construction** — there exists a sequence of taps that wins. However, the player can still lose by filling all reserves with mismatched colors before the corresponding baskets activate. Strategic play means choosing which available node to tap when multiple are matchable, and being judicious about committing colors to reserves when no basket matches.

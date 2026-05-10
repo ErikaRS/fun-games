@@ -1,4 +1,4 @@
 node_modules/
 
 # Generated bundles
-yarn-pull/dist/
+color-trail/dist/

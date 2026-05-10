@@ -1,5 +1,5 @@
 import {
-  addSpoolPressure,
+  addReservePressure,
   assignBasketsToForest,
 } from "./basket-assignment.js";
 import { generateForest, makeRng } from "./forest-generation.js";
@@ -21,17 +21,17 @@ export function buildPuzzleFromForest({
   colorRng,
   pressureRng,
   pressureEnabled = true,
-  spoolCapacity,
+  reserveCapacity,
   maxLag,
   earlyCandidateRatio,
   candidateBudget,
   candidateLimit,
 }) {
   const assignment = assignBasketsToForest(forest, colorRng);
-  const pressured = addSpoolPressure(assignment.forest, assignment.baskets, pressureRng, {
-    spoolCapacity,
+  const pressured = addReservePressure(assignment.forest, assignment.baskets, pressureRng, {
+    reserveCapacity,
     maxLag,
-    forcedSpoolChance: pressureEnabled ? 1 : 0,
+    forcedReserveChance: pressureEnabled ? 1 : 0,
     earlyCandidateRatio,
     candidateBudget,
     candidateLimit,
@@ -44,12 +44,12 @@ export function buildPuzzleFromForest({
   };
 }
 
-export function generateYarnPullPuzzle({
+export function generateColorTrailPuzzle({
   numBaskets,
   seed,
-  spoolCapacity,
+  reserveCapacity,
   maxLag,
-  forcedSpoolChance,
+  forcedReserveChance,
   earlyCandidateRatio,
   candidateBudget,
   candidateLimit,
@@ -61,7 +61,7 @@ export function generateYarnPullPuzzle({
   // upgrade, not a hard requirement.
   let fallback = null;
   const pressureEnabled =
-    forcedSpoolChance === undefined || makeRng(seed ^ PRESSURE_ENABLED_SALT)() <= forcedSpoolChance;
+    forcedReserveChance === undefined || makeRng(seed ^ PRESSURE_ENABLED_SALT)() <= forcedReserveChance;
 
   for (let attempt = 0; attempt < 8; attempt++) {
     const attemptSeed = (seed + attempt * ATTEMPT_STRIDE) >>> 0;
@@ -70,7 +70,7 @@ export function generateYarnPullPuzzle({
       colorRng: makeRng(attemptSeed ^ COLOR_RNG_SALT),
       pressureRng: makeRng(attemptSeed ^ PRESSURE_RNG_SALT),
       pressureEnabled,
-      spoolCapacity,
+      reserveCapacity,
       maxLag,
       earlyCandidateRatio,
       candidateBudget,

@@ -2,9 +2,9 @@
   "name": "fun-games",
   "private": true,
   "scripts": {
-    "build:yarn-pull": "esbuild yarn-pull/main.jsx --bundle --format=esm --jsx=automatic --outfile=yarn-pull/dist/app.js",
-    "serve:yarn-pull": "python3 -m http.server 4173 -d yarn-pull",
-    "start:yarn-pull": "npm run build:yarn-pull && npm run serve:yarn-pull"
+    "build:color-trail": "esbuild color-trail/main.jsx --bundle --format=esm --jsx=automatic --outfile=color-trail/dist/app.js",
+    "serve:color-trail": "python3 -m http.server 4173 -d color-trail",
+    "start:color-trail": "npm run build:color-trail && npm run serve:color-trail"
   },
   "dependencies": {
     "react": "^19.2.5",
