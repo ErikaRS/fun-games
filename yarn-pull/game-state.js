@@ -1,16 +1,29 @@
 // Yarn-pull runtime rules: basket routing, spools, visibility, and taps.
-// GAME STATE
-// Activation queue = reverse of basket creation order (Step 3 of spec).
 //
-// Spools: 5 holding slots that absorb nodes whose color doesn't match any
-// active basket. After every placement (and after a basket fills + advances),
-// auto-flush runs: any spool whose color now matches an active basket empties
-// into that basket. This repeats until stable.
-// ────────────────────────────────────────────────────────────────────────────
+// State model:
+// - `queue` contains future baskets in activation order.
+// - `active` is the fixed set of up to three currently visible baskets. A full
+//   basket is immediately replaced by the next queued basket, or by null.
+// - `spools` are temporary holding slots for colors that do not currently match
+//   an active basket.
+// - `visible` starts with roots; clearing a node reveals its children.
+// - `cleared` and `clearedOrder` are the immutable history used by rendering,
+//   win checks, and undo snapshots.
+//
+// Tap algorithm:
+// 1. Reject taps on cleared or hidden nodes.
+// 2. Route the node color to a matching active basket when possible.
+// 3. Otherwise place the color in the first open spool, or reject if full.
+// 4. Mark the node cleared, reveal its children, then auto-flush any spooled
+//    colors that now match active baskets. Flushing repeats because filling one
+//    basket can activate another basket that accepts more spooled colors.
 
 export const NUM_SPOOLS = 5;
 
 export function buildInitialGameStateFromActivationOrder(activationOrder, spoolCapacity = NUM_SPOOLS) {
+  // Generation and gameplay both provide baskets in activation order here. The
+  // public buildInitialGameState wrapper reverses creation order because basket
+  // creation is leaf-first while play begins at roots.
   const queue = activationOrder.map((b) => ({ ...b }));
   const active = [];
   for (let i = 0; i < 3 && queue.length > 0; i++) {
@@ -33,6 +46,9 @@ export function buildInitialGameState(forest, baskets, spoolCapacity = NUM_SPOOL
 }
 
 function findPreferredBasketSlot(active, color) {
+  // Prefer partially filled baskets of the same color before empty baskets.
+  // This keeps duplicate active colors from splitting one color across baskets
+  // unnecessarily.
   const partialIdx = active.findIndex(
     (b) => b && b.color === color && b.slots.length > 0 && b.slots.length < 3
   );
@@ -96,6 +112,9 @@ export function applyTap(state, forest, nodeId) {
 }
 
 export function applyTapWithOptions(state, forest, nodeId, opts = {}) {
+  // Reducer-style transition: this function returns a new state object and
+  // avoids mutating the caller's sets/arrays. Generation relies on that when it
+  // branches through many hypothetical states during solver searches.
   const spoolCapacity = opts.spoolCapacity ?? state.spools.length;
   const node = forest.nodes[nodeId];
   if (state.cleared.has(nodeId)) return { state, ok: false, reason: "already cleared" };
@@ -173,4 +192,3 @@ export function getPlayableNodeIds(state, forest) {
     (id) => applyTapWithOptions(state, forest, id).ok
   );
 }
-

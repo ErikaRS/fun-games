@@ -1,8 +1,18 @@
 // Forest generation is intentionally UI-free so other yarn-pull variants can reuse it.
-
-// ────────────────────────────────────────────────────────────────────────────
-// FOREST GENERATION (Step 1 of the spec)
-// ────────────────────────────────────────────────────────────────────────────
+//
+// High-level algorithm:
+// 1. Use a seeded RNG so a puzzle seed always rebuilds the same forest.
+// 2. Create a small set of roots, then grow the forest breadth-first.
+// 3. For each frontier node, roll a child count from CHILD_DIST and spend from
+//    a fixed node budget. The target budget is `numBaskets * 3` because each
+//    basket later owns exactly three nodes.
+// 4. Stop when the budget is exhausted or the frontier dies out. The caller can
+//    inspect `actual` versus `target`; generation is allowed to produce a
+//    smaller forest if random growth terminates early.
+//
+// Node ids are array indexes. Parent/child links are stored as ids so later
+// generation and gameplay phases can mutate node metadata without rebuilding
+// references.
 
 const CHILD_DIST = [
   { count: 0, p: 0.01 },
@@ -23,6 +33,8 @@ function rollChildCount(rng) {
 }
 
 export function makeRng(seed) {
+  // Mulberry32: small deterministic PRNG for puzzle reproducibility. It is not
+  // cryptographic; browser crypto is only used by the UI to choose fresh seeds.
   let s = seed >>> 0;
   return function () {
     s |= 0;

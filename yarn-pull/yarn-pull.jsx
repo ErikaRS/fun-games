@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { YARN_COLORS, generateYarnPullPuzzle } from "./basket-assignment.js";
+import { YARN_COLORS } from "./basket-assignment.js";
 import { applyTap, buildInitialGameState, getPlayableNodeIds } from "./game-state.js";
 import { ForestSVG, yarnFillStyle, yarnTitle } from "./layout.jsx";
+import { generateYarnPullPuzzle } from "./puzzle-generation.js";
 
 // APP
 // ────────────────────────────────────────────────────────────────────────────
@@ -9,6 +10,7 @@ import { ForestSVG, yarnFillStyle, yarnTitle } from "./layout.jsx";
 const FONT_DISPLAY = `"Fraunces", "Cormorant Garamond", "Iowan Old Style", Georgia, serif`;
 const FONT_BODY = `"Inter Tight", "Söhne", "Helvetica Neue", system-ui, sans-serif`;
 const FONT_MONO = `"JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace`;
+const MAX_PUZZLE_SEED = 1_000_000;
 const DIFFICULTIES = [
   {
     id: "easy",
@@ -45,9 +47,28 @@ const DIFFICULTIES = [
   },
 ];
 
+function createPuzzleSeed(previousSeed = null) {
+  // The UI needs an unpredictable seed for each new puzzle. The generator then
+  // turns that seed into deterministic RNG streams so a specific puzzle can be
+  // reproduced for debugging, testing, or future share links.
+  let nextSeed;
+  if (globalThis.crypto?.getRandomValues) {
+    const values = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(values);
+    nextSeed = values[0] % MAX_PUZZLE_SEED;
+  } else {
+    nextSeed = Math.floor(Math.random() * MAX_PUZZLE_SEED);
+  }
+
+  if (nextSeed === previousSeed) {
+    return (nextSeed + 1) % MAX_PUZZLE_SEED;
+  }
+  return nextSeed;
+}
+
 function useYarnPullGame() {
   const [difficulty, setDifficulty] = useState("medium");
-  const [seed, setSeed] = useState(42);
+  const [seed, setSeed] = useState(() => createPuzzleSeed());
   const [debugOpen, setDebugOpen] = useState(false);
   const [shake, setShake] = useState(0);
   const [recenterKey, setRecenterKey] = useState(0);
@@ -83,12 +104,12 @@ function useYarnPullGame() {
   }, [forest, baskets, difficultyConfig.spools]);
 
   const reroll = useCallback(() => {
-    setSeed(Math.floor(Math.random() * 1_000_000));
+    setSeed((currentSeed) => createPuzzleSeed(currentSeed));
   }, []);
 
   const changeDifficulty = useCallback((nextDifficulty) => {
     setDifficulty(nextDifficulty);
-    setSeed(Math.floor(Math.random() * 1_000_000));
+    setSeed((currentSeed) => createPuzzleSeed(currentSeed));
   }, []);
 
   const restart = useCallback(() => {
@@ -726,6 +747,7 @@ export function CozyYarnPullApp() {
     recenterKey,
     reroll,
     restart,
+    seed,
     shake,
     stuck,
     tappableIds,
@@ -978,7 +1000,7 @@ export function CozyYarnPullApp() {
           )}
 
           <ForestViewport
-            focusKey={`cozy-${difficulty}-${forest.actual}-${recenterKey}`}
+            focusKey={`cozy-${difficulty}-${seed}-${recenterKey}`}
             variant="cozy"
           >
             <ForestSVG

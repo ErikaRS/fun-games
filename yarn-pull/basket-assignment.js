@@ -1,4 +1,3 @@
-import { generateForest, makeRng } from "./forest-generation.js";
 import {
   NUM_SPOOLS,
   applyTapWithOptions,
@@ -7,10 +6,27 @@ import {
 } from "./game-state.js";
 
 // Basket assignment and basket-order pressure are UI-free.
-// COLORING + BASKET CREATION (Step 2 of the spec)
-// One pick at a time within a basket — parent promotion happens immediately
-// so chains can collapse inside a single basket.
-// ────────────────────────────────────────────────────────────────────────────
+//
+// This module owns the basket phase only. It accepts a forest with this minimal
+// interface:
+// - `forest.nodes`: array of nodes indexed by id.
+// - node fields: `{ id, parentId, children, depth }`.
+// - `forest.rootIds`: ids visible at game start.
+//
+// It deliberately does not create forests or seeds. Callers provide the forest
+// and RNG streams so basket assignment can be tested independently from forest
+// shape generation.
+//
+// High-level basket algorithm:
+// 1. Clone and color the supplied forest from leaves toward roots. A node can
+//    only enter the ready pool after all children are colored, which guarantees
+//    that the reversed basket order has a safe solution.
+// 2. Build baskets in groups of three nodes. Every basket owns exactly the
+//    three nodes colored during that loop, and all three share one color.
+// 3. Optionally perturb the otherwise-safe basket activation order. A candidate
+//    perturbation is accepted only if a witness solver can still finish with
+//    spools, and a zero-spool search cannot finish. That gives the puzzle some
+//    pressure without abandoning solvability-by-construction.
 
 export const YARN_COLORS = [
   { hex: "#36b7c9", name: "aqua", pattern: "cross" },
@@ -26,8 +42,25 @@ export const YARN_COLORS = [
 ];
 
 export const PALETTE = YARN_COLORS.map((color) => color.hex);
+
+function cloneForestForBasketAssignment(forest) {
+  return {
+    ...forest,
+    rootIds: forest.rootIds.slice(),
+    nodes: forest.nodes.map((node) => ({
+      ...node,
+      children: node.children.slice(),
+    })),
+  };
+}
+
 export function assignBasketsToForest(forest, rng) {
-  const { nodes } = forest;
+  // Ready is the moving frontier of nodes that are legal to color now. It
+  // starts at leaves and promotes a parent the instant its last child is
+  // colored. Because promotion happens inside the basket loop, a basket may
+  // contain a child and an ancestor from the same chain.
+  const coloredForest = cloneForestForBasketAssignment(forest);
+  const { nodes } = coloredForest;
   const ready = nodes.filter((n) => n.children.length === 0);
   const coloredChildCount = new Map(nodes.map((n) => [n.id, 0]));
   const baskets = [];
@@ -59,12 +92,14 @@ export function assignBasketsToForest(forest, rng) {
     }
     baskets.push({ id: baskets.length, color, nodeIds });
   }
-  return baskets;
+  return { forest: coloredForest, baskets };
 }
 
 export const colorForestAndMakeBaskets = assignBasketsToForest;
 
-// ────────────────────────────────────────────────────────────────────────────
+// Simulation helpers use the same reducer as real gameplay. They differ only
+// in activation order and spool capacity, which lets generation prove facts
+// about a candidate puzzle without maintaining a parallel rules engine.
 function makeStateForSimulation(forest, activationOrder, spoolCapacity) {
   const routed = buildInitialGameStateFromActivationOrder(activationOrder, spoolCapacity);
   return {
@@ -76,6 +111,9 @@ function makeStateForSimulation(forest, activationOrder, spoolCapacity) {
 }
 
 export function makeSafePreferenceOrder(baskets) {
+  // Baskets are created leaf-first. Activating them in reverse means currently
+  // visible roots wait until their descendants have been cleared, so this order
+  // is the baseline certificate that the colored forest is solvable.
   const order = [];
   for (const basket of baskets.slice().reverse()) {
     order.push(...basket.nodeIds);
@@ -84,6 +122,9 @@ export function makeSafePreferenceOrder(baskets) {
 }
 
 export function solveWithPreferredOrder(forest, activationOrder, preferredNodeOrder, spoolCapacity) {
+  // Greedy witness solver: repeatedly scan currently tappable nodes in a known
+  // safe preference order and take the first legal move. This is not a player
+  // hint system; it is a deterministic certificate used while generating.
   const rank = new Map(preferredNodeOrder.map((id, i) => [id, i]));
   let state = makeStateForSimulation(forest, activationOrder, spoolCapacity);
   const trace = [];
@@ -136,6 +177,10 @@ function encodeZeroSpoolState(state) {
 }
 
 function hasZeroSpoolSolution(forest, activationOrder, maxStates = 4000) {
+  // DFS over the game state with spoolCapacity = 0. `true` means the candidate
+  // is too easy because it can be solved without spools. `false` means spools
+  // are required. `null` means the search budget ran out, so generation rejects
+  // the candidate rather than trusting an incomplete proof.
   const seen = new Set();
   let searched = 0;
 
@@ -176,6 +221,9 @@ function shuffleCopy(items, rng) {
 }
 
 function makePressureCandidateEvents(forest, trace, rng, opts = {}) {
+  // Pressure is easiest to feel when an early player-facing color is delayed.
+  // Start from the safe witness trace, prioritize early non-root nodes, add
+  // slight seeded jitter for variety, then cap the list for generation cost.
   const earlyCandidateRatio = opts.earlyCandidateRatio ?? 0.6;
   const candidateLimit = opts.candidateLimit ?? Infinity;
   const randomJitter = opts.randomJitter ?? 4;
@@ -197,6 +245,9 @@ function makePressureCandidateEvents(forest, trace, rng, opts = {}) {
 }
 
 export function addSpoolPressure(forest, baskets, rng, opts = {}) {
+  // Start from the safe activation order, then try moving one basket later in
+  // that order. A move is accepted only when the normal solver can complete
+  // with the configured spools and the zero-spool solver cannot complete.
   const spoolCapacity = opts.spoolCapacity ?? NUM_SPOOLS;
   const maxLag = opts.maxLag ?? 8;
   const forcedSpoolChance = opts.forcedSpoolChance ?? 1;
@@ -266,42 +317,3 @@ export function addSpoolPressure(forest, baskets, rng, opts = {}) {
     metrics: { pressured: false, reason: "no-certified-pressure-order" },
   };
 }
-
-export function generatePressuredPuzzle({
-  numBaskets,
-  seed,
-  spoolCapacity,
-  maxLag,
-  forcedSpoolChance,
-  earlyCandidateRatio,
-  candidateBudget,
-  candidateLimit,
-}) {
-  let fallback = null;
-  const pressureEnabled =
-    forcedSpoolChance === undefined || makeRng(seed ^ 0x51a7e1ed)() <= forcedSpoolChance;
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const attemptSeed = (seed + attempt * 7919) >>> 0;
-    const forest = generateForest({ numBaskets, seed: attemptSeed });
-    const colorRng = makeRng(attemptSeed ^ 0xb45c0107);
-    const baskets = assignBasketsToForest(forest, colorRng);
-    const pressureRng = makeRng(attemptSeed ^ 0x91e10da5);
-    const pressured = addSpoolPressure(forest, baskets, pressureRng, {
-      spoolCapacity,
-      maxLag,
-      forcedSpoolChance: pressureEnabled ? 1 : 0,
-      earlyCandidateRatio,
-      candidateBudget,
-      candidateLimit,
-    });
-    if (!fallback) fallback = { forest, baskets, pressure: pressured.metrics };
-    if (pressured.metrics.pressured) {
-      return { forest, baskets: pressured.baskets, pressure: pressured.metrics };
-    }
-  }
-  return fallback;
-}
-
-export const generateYarnPullPuzzle = generatePressuredPuzzle;
-
-// ────────────────────────────────────────────────────────────────────────────
